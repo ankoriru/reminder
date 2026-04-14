@@ -2,27 +2,24 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Бот Настройки</title>
+    <title>Настройки Бота</title>
     <style>
-        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f0f2f5; }
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f4f7f6; }
         .nav { display: flex; gap: 5px; margin-bottom: 20px; }
-        .nav button { padding: 10px 20px; border: none; background: #fff; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav button { padding: 10px 20px; border: none; background: #fff; border-radius: 6px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .nav button.active { background: #007bff; color: white; }
         .content { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .tab { display: none; }
         .active-tab { display: block; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
         th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 13px; }
         th { background: #f8f9fa; }
-        .flash { background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+        .flash { background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
     <h2 style="text-align: center;">⚙️ Панель управления</h2>
-    
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
-    {% endwith %}
+    {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}{% endwith %}
 
     <div class="nav">
         <button onclick="showTab('dr')" id="btn-dr" class="active">ДР</button>
@@ -33,38 +30,33 @@
     <div class="content">
         <div id="dr" class="tab active-tab">
             <h3>🎂 Дни Рождения</h3>
-            <a href="/download_template/dr" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Скачать шаблон</a><br><br>
+            <a href="/download_template/dr" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Шаблон XLSX</a><br><br>
             <form action="/upload_dr" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить ДР</button>
+                <button type="submit">Обновить ДР</button>
             </form>
             <table>
-                <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата (ДД.ММ.ГГГГ)</th></tr>
-                {% for b in bdays %}
-                <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
-                {% endfor %}
+                <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата</th></tr>
+                {% for b in bdays %}<tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>{% endfor %}
             </table>
         </div>
 
         <div id="zs" class="tab">
             <h3>🔔 Значимые события</h3>
-            <p style="font-size: 12px; color: #666;">Бот проверяет формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС</p>
-            <a href="/download_template/zs" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Скачать шаблон</a><br><br>
+            <a href="/download_template/zs" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Шаблон XLSX</a><br><br>
             <form action="/upload_zs" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить ЗС</button>
+                <button type="submit">Обновить ЗС</button>
             </form>
             <table>
-                <tr><th>Событие</th><th>Текст напоминания</th><th>Когда (Дата)</th></tr>
-                {% for e in evs %}
-                <tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>
-                {% endfor %}
+                <tr><th>Событие</th><th>Текст напоминания</th><th>Когда</th></tr>
+                {% for e in evs %}<tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>{% endfor %}
             </table>
         </div>
 
         <div id="custom" class="tab">
             <h3>✍️ Custom напоминания</h3>
-            <form action="/add_custom" method="post" style="background:#f9f9f9; padding:15px; border-radius:8px;">
+            <form action="/add_custom" method="post" style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:20px;">
                 <textarea name="text" style="width:100%; height:50px;" placeholder="Текст сообщения" required></textarea><br>
                 <input type="datetime-local" name="dt" required style="width:100%; margin:10px 0;"><br>
                 <select name="period" id="period-select" onchange="toggleDays()" style="width:100%; padding:8px;">
@@ -81,16 +73,12 @@
                     <label><input type="checkbox" name="days" value="5"> Сб</label>
                     <label><input type="checkbox" name="days" value="6"> Вс</label>
                 </div><br>
-                <button type="submit" style="background:#28a745; color:white; border:none; width:100%; padding:10px; border-radius:5px; cursor:pointer; font-weight:bold;">💾 Сохранить</button>
+                <button type="submit" style="background:#28a745; color:white; border:none; width:100%; padding:10px; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Сохранить</button>
             </form>
             <table>
-                <tr><th>Текст</th><th>Время</th><th>Удалить</th></tr>
+                <tr><th>Текст</th><th>Время</th><th>Действие</th></tr>
                 {% for c in customs %}
-                <tr>
-                    <td>{{c.text}}</td>
-                    <td>{{c.dt}}</td>
-                    <td><a href="/delete_custom/{{c.id}}" style="color:red; text-decoration:none;" onclick="return confirm('Удалить?')">❌</a></td>
-                </tr>
+                <tr><td>{{c.text}}</td><td>{{c.dt}}</td><td><a href="/delete_custom/{{c.id}}" style="color:red; text-decoration:none;">❌ Удалить</a></td></tr>
                 {% endfor %}
             </table>
         </div>
