@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Управление ботом</title></head>
+<body>
+    <h2>⚙️ Настройки бота</h2>
+    <hr>
+    <h3>1. Дни Рождения (ДР)</h3>
+    <form action="/upload_dr" method="post" enctype="multipart/form-data">
+        <input type="file" name="file"> <button type="submit">Обновить список ДР</button>
+    </form>
+    
+    <h3>2. Значимые события (ЗС)</h3>
+    <h3>3. CUSTOM (Ручная отправка)</h3>
+    <hr>
+    <h4>Текущие списки:</h4>
+    <table border="1">
+        {% for b in bdays %}
+        <tr><td>{{ b.full_name }}</td><td>{{ b.bday }}</td></tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
