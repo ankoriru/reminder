@@ -107,7 +107,7 @@ def check_and_send():
     conn = get_db_connection()
     try:
         # 1. BIRTHDAYS (09:00 MSK)
-        if now.hour == 20 and now.minute <= 50:
+        if now.hour == 20 and now.minute <= 56:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
