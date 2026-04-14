@@ -18,7 +18,7 @@
 
         body { 
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
-            max-width: 1100px; 
+            max-width: 1200px; 
             margin: auto; 
             padding: 20px; 
             background-color: var(--bg); 
@@ -27,6 +27,28 @@
         }
 
         h2 { text-align: center; margin-bottom: 35px; font-weight: 700; color: var(--text-main); }
+
+        /* Шапка с выходом */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .logout-btn {
+            background: var(--danger);
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .logout-btn:hover {
+            filter: brightness(1.1);
+        }
 
         /* Навигация */
         .nav { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
@@ -59,7 +81,22 @@
         tr:hover { background-color: #fcfcfc; }
 
         /* Алерт сообщения */
-        .flash { padding: 15px 25px; background: #d4edda; color: #155724; border-radius: 12px; margin-bottom: 25px; border: 1px solid #c3e6cb; text-align: center; font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .flash { 
+            padding: 15px 25px; 
+            background: #d4edda; 
+            color: #155724; 
+            border-radius: 12px; 
+            margin-bottom: 25px; 
+            border: 1px solid #c3e6cb; 
+            text-align: center; 
+            font-weight: 600; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
+        }
+        .flash.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
 
         /* Формы */
         .form-box { background: #f8f9fa; padding: 30px; border-radius: 15px; border: 1px solid #eaebed; margin-bottom: 35px; }
@@ -86,7 +123,18 @@
         .status-sent { background: #d4edda; color: #155724; }
         .status-wait { background: #fff3cd; color: #856404; }
         
-        .btn-test { float: right; background: var(--warning); color: #000; padding: 8px 18px; text-decoration: none; border-radius: 8px; font-size: 13px; font-weight: 700; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn-test { 
+            float: right; 
+            background: var(--warning); 
+            color: #000; 
+            padding: 8px 18px; 
+            text-decoration: none; 
+            border-radius: 8px; 
+            font-size: 13px; 
+            font-weight: 700; 
+            transition: 0.2s; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
         .btn-test:hover { background: #e0a800; transform: translateY(-1px); }
 
         .btn-del { color: var(--danger); text-decoration: none; font-size: 18px; font-weight: bold; }
@@ -104,14 +152,48 @@
         }
         .days-grid label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; font-weight: 500; }
         .days-grid input[type="checkbox"] { width: auto; margin: 0; }
+        
+        /* Инфо блок */
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid var(--primary);
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 0 10px 10px 0;
+        }
+        .info-box p {
+            margin: 5px 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        
+        /* Период бейдж */
+        .period-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #e9ecef;
+            border-radius: 15px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
     </style>
+<base target="_blank">
 </head>
 <body>
 
-    <h2>⚙️ Showcase Notification Control</h2>
+    <div class="header">
+        <div></div>
+        <h2 style="margin:0;">⚙️ Notification Control Center</h2>
+        <a href="/logout" class="logout-btn">🚪 Выход</a>
+    </div>
     
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {% if category == 'error' %}error{% endif %}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
     {% endwith %}
 
     <div class="nav">
@@ -121,60 +203,94 @@
     </div>
 
     <div class="content">
+        <!-- ВКЛАДКА ДНИ РОЖДЕНИЯ -->
         <div id="dr" class="tab active-tab">
             <a href="/test_send/dr" class="btn-test">⚙️ Проверить связь (ТГ)</a>
             <h3>🎂 Список Дней Рождения</h3>
-            <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Бот автоматически поздравит коллег в <b>09:00 (МСК)</b> по полю "Дата".</p>
+            
+            <div class="info-box">
+                <p>🤖 Бот автоматически отправляет поздравления в <b>09:00 (МСК)</b></p>
+                <p>📋 Формат файла: <b>Фамилия Имя | Должность | Подразделение | ДД.ММ</b></p>
+                <p>📁 Поддерживаемые форматы: <b>XLSX, CSV</b></p>
+            </div>
             
             <a href="/download_template/dr" class="btn-template">📥 Скачать шаблон XLSX</a>
             
             <div class="form-box">
                 <form action="/upload_dr" method="post" enctype="multipart/form-data">
-                    <label style="font-weight: 600;">Загрузить файл Excel:</label>
-                    <input type="file" name="file" accept=".xlsx" required style="border:none; padding: 10px 0;">
+                    <label style="font-weight: 600;">Загрузить файл (XLSX или CSV):</label>
+                    <input type="file" name="file" accept=".xlsx,.xls,.csv" required style="border:none; padding: 10px 0;">
                     <button type="submit" style="background: var(--primary); width: auto; padding: 10px 25px;">🚀 Обновить базу данных</button>
                 </form>
             </div>
 
+            <h4>📋 Текущий список ({{ bdays|length }} записей)</h4>
             <div class="table-container">
                 <table>
                     <thead>
-                        <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата</th></tr>
+                        <tr>
+                            <th>Фамилия Имя</th>
+                            <th>Должность</th>
+                            <th>Подразделение</th>
+                            <th>День рождения</th>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for b in bdays %}
-                        <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
+                        <tr>
+                            <td><b>{{ b.full_name }}</b></td>
+                            <td>{{ b.pos }}</td>
+                            <td>{{ b.dep }}</td>
+                            <td>{{ b.bday }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted);">Список пуст. Загрузите данные.</td>
+                        </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
 
+        <!-- ВКЛАДКА ЗНАЧИМЫЕ СОБЫТИЯ -->
         <div id="zs" class="tab">
             <a href="/test_send/zs" class="btn-test">⚙️ Проверить связь (ТГ)</a>
             <h3>🔔 Значимые события и Дедлайны</h3>
-            <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Оповещения уходят по точному времени. Если бот был офлайн, он дошлет пропущенное.</p>
+            
+            <div class="info-box">
+                <p>🤖 Оповещения уходят по <b>точному времени</b> указанному в файле</p>
+                <p>📋 Формат файла: <b>Событие | Напоминание | ДД.ММ.ГГ ЧЧ:ММ</b></p>
+                <p>📁 Поддерживаемые форматы: <b>XLSX, CSV</b></p>
+            </div>
             
             <a href="/download_template/zs" class="btn-template">📥 Скачать шаблон XLSX</a>
             
             <div class="form-box">
                 <form action="/upload_zs" method="post" enctype="multipart/form-data">
-                    <label style="font-weight: 600;">Загрузить новый график:</label>
-                    <input type="file" name="file" accept=".xlsx" required style="border:none; padding: 10px 0;">
+                    <label style="font-weight: 600;">Загрузить файл (XLSX или CSV):</label>
+                    <input type="file" name="file" accept=".xlsx,.xls,.csv" required style="border:none; padding: 10px 0;">
                     <button type="submit" style="background: var(--primary); width: auto; padding: 10px 25px;">🔄 Синхронизировать график</button>
                 </form>
             </div>
 
+            <h4>📋 Текущий список ({{ evs|length }} записей)</h4>
             <div class="table-container">
                 <table>
                     <thead>
-                        <tr><th>Событие</th><th>Время отправки</th><th>Статус</th></tr>
+                        <tr>
+                            <th>Событие</th>
+                            <th>Текст напоминания</th>
+                            <th>Дата и время</th>
+                            <th>Статус</th>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for e in evs %}
                         <tr>
-                            <td><b>{{e.event_name}}</b><br><small style="color: #666;">{{e.reminder_text}}</small></td>
-                            <td>{{e.dt}}</td>
+                            <td><b>{{ e.event_name }}</b></td>
+                            <td>{{ e.reminder_text }}</td>
+                            <td>{{ e.dt }}</td>
                             <td>
                                 {% if e.is_sent == 1 %}
                                 <span class="status-badge status-sent">Отправлено ✅</span>
@@ -183,41 +299,55 @@
                                 {% endif %}
                             </td>
                         </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted);">Список пуст. Загрузите данные.</td>
+                        </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
 
+        <!-- ВКЛАДКА CUSTOM ЗАДАЧИ -->
         <div id="custom" class="tab">
             <a href="/test_send/custom" class="btn-test">⚙️ Проверить связь (ТГ)</a>
             <h3>✍️ Планирование ручных уведомлений</h3>
             
+            <div class="info-box">
+                <p>🤖 Создавайте разовые или периодические уведомления</p>
+                <p>📅 Поддерживаемые периоды: <b>один раз, каждый день, рабочие дни, выбранные дни, каждую неделю, каждый месяц, каждый год</b></p>
+            </div>
+            
             <div class="form-box">
                 <form action="/add_custom" method="post">
                     <label style="font-weight: 600;">Текст сообщения:</label>
-                    <textarea name="text" placeholder="Введите текст, который бот пришлет в чат..." required></textarea>
+                    <textarea name="text" placeholder="Введите текст, который бот пришлет в чат..." required rows="3"></textarea>
                     
-                    <label style="font-weight: 600;">Время старта:</label>
+                    <label style="font-weight: 600;">Дата и время первого запуска:</label>
                     <input type="datetime-local" name="dt" required>
                     
                     <label style="font-weight: 600;">Режим повтора:</label>
                     <select name="period" id="period-select" onchange="toggleDays()">
-                        <option value="once">Только один раз</option>
-                        <option value="workdays">Рабочие дни (Пн-Пт)</option>
-                        <option value="weekdays">Выбранные дни недели</option>
+                        <option value="once">📅 Только один раз</option>
+                        <option value="daily">📆 Каждый день</option>
+                        <option value="workdays">💼 Рабочие дни (Пн-Пт)</option>
+                        <option value="weekdays">📌 Выбранные дни недели</option>
+                        <option value="weekly">🗓️ Каждую неделю</option>
+                        <option value="monthly">📅 Каждый месяц</option>
+                        <option value="yearly">🎉 Каждый год</option>
                     </select>
 
                     <div id="days-picker" style="display:none;">
                         <label style="font-weight: 600;">Выберите дни недели:</label>
                         <div class="days-grid">
-                            <label><input type="checkbox" name="days" value="0"> Пн</label>
-                            <label><input type="checkbox" name="days" value="1"> Вт</label>
-                            <label><input type="checkbox" name="days" value="2"> Ср</label>
-                            <label><input type="checkbox" name="days" value="3"> Чт</label>
-                            <label><input type="checkbox" name="days" value="4"> Пт</label>
-                            <label><input type="checkbox" name="days" value="5"> Сб</label>
-                            <label><input type="checkbox" name="days" value="6"> Вс</label>
+                            <label><input type="checkbox" name="days" value="0"> Понедельник</label>
+                            <label><input type="checkbox" name="days" value="1"> Вторник</label>
+                            <label><input type="checkbox" name="days" value="2"> Среда</label>
+                            <label><input type="checkbox" name="days" value="3"> Четверг</label>
+                            <label><input type="checkbox" name="days" value="4"> Пятница</label>
+                            <label><input type="checkbox" name="days" value="5"> Суббота</label>
+                            <label><input type="checkbox" name="days" value="6"> Воскресенье</label>
                         </div>
                     </div>
 
@@ -225,19 +355,35 @@
                 </form>
             </div>
 
+            <h4>📋 Активные задачи ({{ customs|length }})</h4>
             <div class="table-container">
                 <table>
                     <thead>
-                        <tr><th>Текст сообщения</th><th>Время / Режим</th><th style="text-align: center;">Удалить</th></tr>
+                        <tr>
+                            <th>Текст сообщения</th>
+                            <th>Время / Дата</th>
+                            <th>Периодичность</th>
+                            <th style="text-align: center;">Удалить</th>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for c in customs %}
                         <tr>
-                            <td>{{c.text}}</td>
-                            <td>{{c.dt}}</td>
-                            <td style="text-align: center;">
-                                <a href="/delete_custom/{{c.id}}" class="btn-del" onclick="return confirm('Удалить это уведомление?')">🗑️</a>
+                            <td>{{ c.text }}</td>
+                            <td>{{ c.dt }}</td>
+                            <td>
+                                <span class="period-badge">{{ get_period_display(c.period, c.weekdays) }}</span>
+                                {% if c.weekdays and c.period == 'weekdays' %}
+                                    <br><small style="color: var(--text-muted);">Дни: {{ c.weekdays }}</small>
+                                {% endif %}
                             </td>
+                            <td style="text-align: center;">
+                                <a href="/delete_custom/{{ c.id }}" class="btn-del" onclick="return confirm('Удалить это уведомление?')">🗑️</a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted);">Нет активных задач. Создайте новую.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -253,6 +399,9 @@
             
             document.getElementById(id).classList.add('active-tab');
             document.getElementById('btn-' + id).classList.add('active');
+            
+            // Сохраняем активную вкладку
+            localStorage.setItem('activeTab', id);
         }
 
         function toggleDays() {
@@ -260,6 +409,14 @@
             const picker = document.getElementById('days-picker');
             picker.style.display = (val === 'weekdays') ? 'block' : 'none';
         }
+        
+        // Восстанавливаем активную вкладку при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedTab = localStorage.getItem('activeTab');
+            if (savedTab) {
+                showTab(savedTab);
+            }
+        });
     </script>
 </body>
 </html>
