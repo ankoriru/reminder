@@ -74,6 +74,12 @@ def init_db():
         if 'last_sent' not in cols_c:
             conn.execute("ALTER TABLE custom_tasks ADD COLUMN last_sent TEXT")
         
+        # Migration for sent_log table
+        cursor_sl = conn.execute("PRAGMA table_info(sent_log)")
+        cols_sl = [row[1] for row in cursor_sl.fetchall()]
+        if 'sent_at' not in cols_sl:
+            conn.execute("ALTER TABLE sent_log ADD COLUMN sent_at TEXT")
+        
         conn.commit()
 
 def is_already_sent_recently(conn, notif_type, ref_id, minutes=15):
@@ -118,7 +124,7 @@ def check_and_send():
     conn = get_db_connection()
     try:
         # 1. BIRTHDAYS (09:00 MSK)
-        if now.hour == 21 and now.minute <= 15:
+        if now.hour == 21 and now.minute <= 21:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
@@ -126,7 +132,7 @@ def check_and_send():
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
                 if bday_str and bday_str.startswith(now_dm):
                     # Проверяем, не отправляли ли за последние 15 минут
-                    if not is_already_sent_recently(conn, 'birthday', person['id'], minutes=15):
+                    if not is_already_sent_recently(conn, 'birthday', person['id'], minutes=2):
                         birthday_people.append(person)
             
             if birthday_people:
