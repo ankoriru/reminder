@@ -58,6 +58,8 @@ def init_db():
             (id INTEGER PRIMARY KEY AUTOINCREMENT, event_name TEXT, reminder_text TEXT, dt TEXT, is_sent INTEGER DEFAULT 0)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT, last_sent TEXT)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
+            (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, sent_date TEXT, UNIQUE(type, sent_date))''')
         
         # Migrations
         cursor = conn.execute("PRAGMA table_info(events)")
@@ -74,7 +76,24 @@ def init_db():
         
         conn.commit()
 
+def is_birthday_sent_today(conn, today_str):
+    """Проверка, было ли уже отправлено поздравление сегодня"""
+    cursor = conn.execute(
+        "SELECT 1 FROM sent_log WHERE type = 'birthday' AND sent_date = ?",
+        (today_str,)
+    )
+    return cursor.fetchone() is not None
 
+def mark_birthday_sent(conn, today_str):
+    """Отметить, что поздравление отправлено сегодня"""
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO sent_log (type, sent_date) VALUES ('birthday', ?)",
+            (today_str,)
+        )
+        conn.commit()
+    except:
+        pass
 
 # --- SCHEDULER ---
 def check_and_send():
@@ -84,24 +103,31 @@ def check_and_send():
     current_weekday = now.weekday()
     now_time_hm = now.strftime("%H:%M")
     
+    today_str = now.strftime("%Y-%m-%d")
     conn = get_db_connection()
     try:
-        # 1. BIRTHDAYS (09:00 MSK) - отправляем один раз в 09:00
-        if now.hour == 21 and now.minute == 35:
-            celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
-            birthday_people = []
-            
-            for person in celebrants:
-                bday_str = str(person['bday']).strip() if person['bday'] else ""
-                if bday_str and bday_str.startswith(now_dm):
-                    birthday_people.append(person)
-            
-            if birthday_people:
-                msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
-                for person in birthday_people:
-                    msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
-                msg_lines.append("Поздравляем 😊🎊")
-                send_msg_threadsafe("\n".join(msg_lines))
+        # 1. BIRTHDAYS (09:00 MSK) - отправляем один раз в день
+        # Проверяем с 09:00 до 09:59, если ещё не отправляли
+        if now.hour == 9:
+            # Проверяем, не отправляли ли уже сегодня
+            if not is_birthday_sent_today(conn, today_str):
+                celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
+                birthday_people = []
+                
+                for person in celebrants:
+                    bday_str = str(person['bday']).strip() if person['bday'] else ""
+                    if bday_str and bday_str.startswith(now_dm):
+                        birthday_people.append(person)
+                
+                if birthday_people:
+                    msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
+                    for person in birthday_people:
+                        msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
+                    msg_lines.append("Поздравляем 😊🎊")
+                    send_msg_threadsafe("\n".join(msg_lines))
+                
+                # Отмечаем как отправленное (даже если никого нет, чтобы не проверять каждую минуту)
+                mark_birthday_sent(conn, today_str)
         
         # 2. EVENTS
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
