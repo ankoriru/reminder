@@ -15,11 +15,3 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row 
     return conn
 
-# Пример создания таблиц при запуске
-def init_db():
-    with get_db_connection() as conn:
-        conn.execute('CREATE TABLE IF NOT EXISTS birthdays (...)')
-        conn.execute('CREATE TABLE IF NOT EXISTS events (...)')
-        conn.commit()
-
-ща
