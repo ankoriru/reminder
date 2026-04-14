@@ -1,22 +1,87 @@
 <!DOCTYPE html>
-<html>
-<head><title>Управление ботом</title></head>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Панель управления Ботом</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .tab { display: none; padding: 20px; border: 1px solid #ccc; }
+        .active { display: block; }
+        button.tab-btn { padding: 10px; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    </style>
+</head>
 <body>
-    <h2>⚙️ Настройки бота</h2>
-    <hr>
-    <h3>1. Дни Рождения (ДР)</h3>
-    <form action="/upload_dr" method="post" enctype="multipart/form-data">
-        <input type="file" name="file"> <button type="submit">Обновить список ДР</button>
-    </form>
-    
-    <h3>2. Значимые события (ЗС)</h3>
-    <h3>3. CUSTOM (Ручная отправка)</h3>
-    <hr>
-    <h4>Текущие списки:</h4>
-    <table border="1">
-        {% for b in bdays %}
-        <tr><td>{{ b.full_name }}</td><td>{{ b.bday }}</td></tr>
-        {% endfor %}
-    </table>
+    <h1>Управление уведомлениями</h1>
+    {% with messages = get_flashed_messages() %}{% if messages %}
+        <div style="color: green;">{{ messages[0] }}</div>
+    {% endif %}{% endwith %}
+
+    <div>
+        <button class="tab-btn" onclick="openTab('dr')">Вкладка ДР</button>
+        <button class="tab-btn" onclick="openTab('zs')">Вкладка ЗС</button>
+        <button class="tab-btn" onclick="openTab('custom')">Вкладка CUSTOM</button>
+    </div>
+
+    <div id="dr" class="tab active">
+        <h3>Загрузка Дней Рождения (xlsx/csv)</h3>
+        <p>Формат: Фамилия Имя | Должность | Подразделение | ДД.ММ</p>
+        <form action="/upload_dr" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".xlsx, .csv">
+            <button type="submit">Обновить базу ДР</button>
+        </form>
+        <table>
+            <tr><th>ФИО</th><th>Должность</th><th>Подразделение</th><th>Дата</th></tr>
+            {% for row in birthdays %}
+            <tr><td>{{row.full_name}}</td><td>{{row.pos}}</td><td>{{row.dep}}</td><td>{{row.bday}}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div id="zs" class="tab">
+        <h3>Значимые события</h3>
+        <p>Формат: Событие | Напоминание | ДД.ММ.ГГ ЧЧ:ММ</p>
+        <form action="/upload_zs" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".xlsx, .csv">
+            <button type="submit">Обновить базу ЗС</button>
+        </form>
+        <table>
+            <tr><th>Событие</th><th>Текст напоминания</th><th>Дата и время</th></tr>
+            {% for row in events %}
+            <tr><td>{{row.event_name}}</td><td>{{row.reminder_text}}</td><td>{{row.dt}}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div id="custom" class="tab">
+        <h3>Ручное уведомление</h3>
+        <form action="/add_custom" method="post">
+            <textarea name="text" placeholder="Текст сообщения" required></textarea><br><br>
+            <input type="datetime-local" name="dt" required>
+            <select name="period">
+                <option>Единоразово</option>
+                <option>Каждый день</option>
+                <option>Каждую неделю</option>
+                <option>Раз в месяц</option>
+            </select>
+            <button type="submit">Сохранить</button>
+        </form>
+        <h3>Активные напоминания</h3>
+        <table>
+            <tr><th>Текст</th><th>Когда</th><th>Период</th></tr>
+            {% for row in customs %}
+            <tr><td>{{row.text}}</td><td>{{row.dt}}</td><td>{{row.period}}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <script>
+        function openTab(name) {
+            var tabs = document.getElementsByClassName("tab");
+            for (var i = 0; i < tabs.length; i++) tabs[i].style.display = "none";
+            document.getElementById(name).style.display = "block";
+        }
+    </script>
 </body>
 </html>
