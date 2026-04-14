@@ -2,85 +2,97 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Панель управления Ботом</title>
+    <title>Настройки Бота</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
-        .tab { display: none; padding: 20px; border: 1px solid #ccc; }
-        .active { display: block; }
-        button.tab-btn { padding: 10px; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f4f4f9; }
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav button { padding: 10px 20px; cursor: pointer; border: none; background: #ddd; border-radius: 5px; }
+        .nav button.active { background: #007bff; color: white; }
+        .content { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .tab { display: none; }
+        .active-tab { display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #f8f9fa; }
+        .btn-dl { display: inline-block; margin-bottom: 15px; color: #007bff; text-decoration: none; font-weight: bold; }
+        .flash { color: green; margin-bottom: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>Управление уведомлениями</h1>
-    {% with messages = get_flashed_messages() %}{% if messages %}
-        <div style="color: green;">{{ messages[0] }}</div>
-    {% endif %}{% endwith %}
+    <h1>Управление рассылками</h1>
+    
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
 
-    <div>
-        <button class="tab-btn" onclick="openTab('dr')">Вкладка ДР</button>
-        <button class="tab-btn" onclick="openTab('zs')">Вкладка ЗС</button>
-        <button class="tab-btn" onclick="openTab('custom')">Вкладка CUSTOM</button>
+    <div class="nav">
+        <button onclick="showTab('dr')" id="btn-dr" class="active">Вкладка ДР</button>
+        <button onclick="showTab('zs')" id="btn-zs">Вкладка ЗС</button>
+        <button onclick="showTab('custom')" id="btn-custom">Вкладка CUSTOM</button>
     </div>
 
-    <div id="dr" class="tab active">
-        <h3>Загрузка Дней Рождения (xlsx/csv)</h3>
-        <p>Формат: Фамилия Имя | Должность | Подразделение | ДД.ММ</p>
-        <form action="/upload_dr" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".xlsx, .csv">
-            <button type="submit">Обновить базу ДР</button>
-        </form>
-        <table>
-            <tr><th>ФИО</th><th>Должность</th><th>Подразделение</th><th>Дата</th></tr>
-            {% for row in birthdays %}
-            <tr><td>{{row.full_name}}</td><td>{{row.pos}}</td><td>{{row.dep}}</td><td>{{row.bday}}</td></tr>
-            {% endfor %}
-        </table>
-    </div>
+    <div class="content">
+        <div id="dr" class="tab active-tab">
+            <h3>Загрузка Дней Рождения</h3>
+            <a href="/download_template/dr" class="btn-dl">📥 Скачать шаблон XLSX</a>
+            <form action="/upload_dr" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" accept=".xlsx" required>
+                <button type="submit">Обновить список</button>
+            </form>
+            <table>
+                <tr><th>ФИО</th><th>Должность</th><th>Подразделение</th><th>Дата</th></tr>
+                {% for b in bdays %}
+                <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
 
-    <div id="zs" class="tab">
-        <h3>Значимые события</h3>
-        <p>Формат: Событие | Напоминание | ДД.ММ.ГГ ЧЧ:ММ</p>
-        <form action="/upload_zs" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".xlsx, .csv">
-            <button type="submit">Обновить базу ЗС</button>
-        </form>
-        <table>
-            <tr><th>Событие</th><th>Текст напоминания</th><th>Дата и время</th></tr>
-            {% for row in events %}
-            <tr><td>{{row.event_name}}</td><td>{{row.reminder_text}}</td><td>{{row.dt}}</td></tr>
-            {% endfor %}
-        </table>
-    </div>
+        <div id="zs" class="tab">
+            <h3>Значимые события</h3>
+            <a href="/download_template/zs" class="btn-dl">📥 Скачать шаблон XLSX</a>
+            <form action="/upload_zs" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" accept=".xlsx" required>
+                <button type="submit">Обновить события</button>
+            </form>
+            <table>
+                <tr><th>Событие</th><th>Напоминание</th><th>Дата/Время</th></tr>
+                {% for e in evs %}
+                <tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
 
-    <div id="custom" class="tab">
-        <h3>Ручное уведомление</h3>
-        <form action="/add_custom" method="post">
-            <textarea name="text" placeholder="Текст сообщения" required></textarea><br><br>
-            <input type="datetime-local" name="dt" required>
-            <select name="period">
-                <option>Единоразово</option>
-                <option>Каждый день</option>
-                <option>Каждую неделю</option>
-                <option>Раз в месяц</option>
-            </select>
-            <button type="submit">Сохранить</button>
-        </form>
-        <h3>Активные напоминания</h3>
-        <table>
-            <tr><th>Текст</th><th>Когда</th><th>Период</th></tr>
-            {% for row in customs %}
-            <tr><td>{{row.text}}</td><td>{{row.dt}}</td><td>{{row.period}}</td></tr>
-            {% endfor %}
-        </table>
+        <div id="custom" class="tab">
+            <h3>Ручная отправка сообщений</h3>
+            <form action="/add_custom" method="post">
+                <p>Текст сообщения:<br><textarea name="text" rows="3" style="width:100%" required></textarea></p>
+                <p>Дата и время: <input type="datetime-local" name="dt" required></p>
+                <p>Периодичность: 
+                    <select name="period">
+                        <option>Единоразово</option>
+                        <option>Каждый день</option>
+                        <option>Каждую неделю</option>
+                    </select>
+                </p>
+                <button type="submit">Сохранить напоминание</button>
+            </form>
+            <hr>
+            <h3>Список CUSTOM напоминаний</h3>
+            <table>
+                <tr><th>Сообщение</th><th>Когда</th><th>Период</th></tr>
+                {% for c in customs %}
+                <tr><td>{{c.text}}</td><td>{{c.dt}}</td><td>{{c.period}}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
     </div>
 
     <script>
-        function openTab(name) {
-            var tabs = document.getElementsByClassName("tab");
-            for (var i = 0; i < tabs.length; i++) tabs[i].style.display = "none";
-            document.getElementById(name).style.display = "block";
+        function showTab(id) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active-tab'));
+            document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active-tab');
+            document.getElementById('btn-' + id).classList.add('active');
         }
     </script>
 </body>
