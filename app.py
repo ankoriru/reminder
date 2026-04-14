@@ -12,12 +12,9 @@ from aiogram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- КОНФИГУРАЦИЯ ---
-# Пароль прописан в коде (как требовалось)
-ADMIN_PASSWORD = "admin123"  # Измените на свой пароль
-
-# Токен и Chat ID можно задать здесь или через переменные окружения
-TOKEN = os.getenv('BOT_TOKEN', '')  # Замените '' на ваш токен, например: '123456:ABC-DEF...'
-CHAT_ID = os.getenv('CHAT_ID', '')  # Замените '' на ID чата, например: '-1001234567890'
+TOKEN = os.getenv('TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
