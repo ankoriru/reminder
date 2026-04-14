@@ -1,17 +1,40 @@
-import sqlite3
-import os
-
-# Указываем путь к папке, которую мы создали в Шаге 1
-DB_PATH = '/data/bot_database.db'
-
-def get_db_connection():
-    # Проверяем, существует ли папка (на всякий случай для локальных тестов)
-    db_dir = os.path.dirname(DB_PATH)
-    if not os.path.exists(db_dir) and db_dir != '':
-        os.makedirs(db_dir)
-        
+def init_db():
     conn = sqlite3.connect(DB_PATH)
-    # Позволяет обращаться к полям по именам, как в словаре
-    conn.row_factory = sqlite3.Row 
-    return conn
+    cursor = conn.cursor()
+    
+    # 1. Таблица Дней Рождения
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS birthdays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT,
+            position TEXT,
+            department TEXT,
+            birth_date TEXT
+        )
+    ''')
+    
+    # 2. Таблица Значимых Событий
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_name TEXT,
+            reminder_text TEXT,
+            event_datetime TEXT
+        )
+    ''')
 
+    # 3. Таблица CUSTOM (из твоего пункта 3)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS custom_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT,
+            run_datetime TEXT,       -- Дата и время запуска
+            periodicity TEXT,        -- 'once', 'daily', 'weekly', 'monthly', 'yearly'
+            last_run TEXT            -- Чтобы не отправлять дважды в одну минуту
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+init_db()
