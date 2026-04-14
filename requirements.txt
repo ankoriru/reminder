@@ -1,0 +1,6 @@
+flask
+aiogram
+apscheduler
+pandas
+openpyxl
+pytz
