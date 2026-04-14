@@ -69,6 +69,10 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT, last_sent TEXT)''')
         
+        # Таблица лога отправленных уведомлений (чтобы не отправлять дубли)
+        conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
+            (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, UNIQUE(type, ref_id, sent_date))''')
+        
         # Миграции (проверка структуры)
         cursor = conn.execute("PRAGMA table_info(events)")
         cols = [row[1] for row in cursor.fetchall()]
@@ -84,49 +88,76 @@ def init_db():
         
         conn.commit()
 
+def is_already_sent_today(conn, notif_type, ref_id, today_str):
+    """Проверка, было ли уже отправлено уведомление сегодня"""
+    cursor = conn.execute(
+        "SELECT 1 FROM sent_log WHERE type = ? AND ref_id = ? AND sent_date = ?",
+        (notif_type, ref_id, today_str)
+    )
+    return cursor.fetchone() is not None
+
+def mark_as_sent(conn, notif_type, ref_id, today_str):
+    """Отметить уведомление как отправленное"""
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO sent_log (type, ref_id, sent_date) VALUES (?, ?, ?)",
+            (notif_type, ref_id, today_str)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[ERROR] Failed to mark as sent: {e}")
+
 # --- ЛОГИКА ПЛАНИРОВЩИКА ---
 def check_and_send():
     """Проверка и отправка уведомлений"""
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")  # Текущий день и месяц для ДР (ДД.ММ)
+    today_str = now.strftime("%Y-%m-%d")  # Сегодняшняя дата для проверки дублей
     current_weekday = now.weekday()  # 0=Пн, 6=Вс
     now_time_hm = now.strftime("%H:%M")  # Текущее время ЧЧ:ММ
     now_str = now.strftime("%d.%m.%Y %H:%M:%S")
     
     print(f"\n[{'='*50}]")
     print(f"[CHECK] {now_str} MSK")
-    print(f"[INFO] now_dm={now_dm}, weekday={current_weekday}, time={now_time_hm}")
+    print(f"[INFO] now_dm={now_dm}, today={today_str}, weekday={current_weekday}, time={now_time_hm}")
     
     conn = get_db_connection()
     try:
-        # 1. ДНИ РОЖДЕНИЯ (09:00 МСК)
+        # 1. ДНИ РОЖДЕНИЯ (09:00 МСК) - проверяем каждые 2 минуты
         print(f"\n[BDAY CHECK] hour={now.hour}, minute={now.minute}")
-        if now.hour == 20 and now.minute == 30:
+        if now.hour == 20 and now.minute <= 43:  # Только в первые 2 минуты часа
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             print(f"[BDAY] Found {len(celebrants)} total birthdays in DB")
-            birthday_people = []
             
+            birthday_people = []
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
                 print(f"[BDAY] Checking: {person['full_name']}, bday='{bday_str}', now_dm='{now_dm}'")
+                
                 # Проверяем совпадение ДД.ММ
                 if bday_str and bday_str.startswith(now_dm):
-                    birthday_people.append(person)
-                    print(f"[BDAY] MATCH! {person['full_name']}")
+                    # Проверяем, не отправляли ли уже сегодня
+                    if not is_already_sent_today(conn, 'birthday', person['id'], today_str):
+                        birthday_people.append(person)
+                        print(f"[BDAY] MATCH and not sent today! {person['full_name']}")
+                    else:
+                        print(f"[BDAY] Already sent today: {person['full_name']}")
             
             if birthday_people:
                 # Формируем сообщение согласно ТЗ
                 msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
                 for person in birthday_people:
                     msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
+                    # Отмечаем как отправленное
+                    mark_as_sent(conn, 'birthday', person['id'], today_str)
                 msg_lines.append("Поздравляем 😊🎊")
                 msg = "\n".join(msg_lines)
                 send_msg_threadsafe(msg)
                 print(f"[BDAY SENT] Message sent for {len(birthday_people)} people")
             else:
-                print(f"[BDAY] No birthdays today")
+                print(f"[BDAY] No new birthdays to congratulate today")
         else:
-            print(f"[BDAY SKIP] Not 09:00 (current: {now.hour}:{now.minute:02d})")
+            print(f"[BDAY SKIP] Not 09:00-09:01 (current: {now.hour}:{now.minute:02d})")
         
         # 2. ЗНАЧИМЫЕ СОБЫТИЯ (ЗС) - Точное время
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
@@ -141,18 +172,21 @@ def check_and_send():
                     print(f"[EVENT SKIP] Empty dt")
                     continue
                 
-                # Парсим дату события
+                # Парсим дату события - НЕ добавляем tzinfo, сравниваем наивные datetime
                 try:
-                    event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
+                    event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S")
                 except ValueError as e:
                     print(f"[EVENT ERROR] Cannot parse date '{event_dt_str}': {e}")
                     continue
                 
-                print(f"[EVENT] Parsed: {event_dt.strftime('%d.%m.%Y %H:%M:%S')}, Now: {now_str}")
-                print(f"[EVENT] event_dt <= now: {event_dt <= now}")
+                # Создаем наивный datetime для now (без tzinfo)
+                now_naive = now.replace(tzinfo=None)
+                
+                print(f"[EVENT] Parsed event: {event_dt}, Now (naive): {now_naive}")
+                print(f"[EVENT] event_dt <= now_naive: {event_dt <= now_naive}")
                 
                 # Сравниваем с текущим временем
-                if event_dt <= now:
+                if event_dt <= now_naive:
                     msg = f"💡 {event['reminder_text']}"
                     send_msg_threadsafe(msg)
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
