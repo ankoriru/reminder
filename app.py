@@ -22,18 +22,21 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 bot = Bot(token=TOKEN)
 
-# Глобальная переменная для цикла событий бота
+# --- РЕШЕНИЕ ОШИБКИ EVENT LOOP CLOSED ---
+# Создаем выделенный поток с вечным циклом для бота
 bot_loop = asyncio.new_event_loop()
 
 def start_bot_loop(loop):
-    """Запуск бесконечного цикла событий в отдельном потоке"""
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
-# Запускаем поток при старте приложения
 threading.Thread(target=start_bot_loop, args=(bot_loop,), daemon=True).start()
 
-# --- БАЗА ДАННЫХ ---
+def send_msg_threadsafe(text):
+    """Безопасная отправка сообщения из любого потока в цикл бота"""
+    asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
+
+# --- БАЗА ДАННЫХ И МИГРАЦИИ ---
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -48,42 +51,32 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT)''')
         
-        # Миграции
+        # Миграции (проверка структуры)
         cursor = conn.execute("PRAGMA table_info(events)")
         cols = [row[1] for row in cursor.fetchall()]
-        if 'is_sent' not in cols:
-            conn.execute("ALTER TABLE events ADD COLUMN is_sent INTEGER DEFAULT 0")
+        if 'is_sent' not in cols: conn.execute("ALTER TABLE events ADD COLUMN is_sent INTEGER DEFAULT 0")
         
         cursor_c = conn.execute("PRAGMA table_info(custom_tasks)")
         cols_c = [row[1] for row in cursor_c.fetchall()]
-        if 'weekdays' not in cols_c:
-            conn.execute("ALTER TABLE custom_tasks ADD COLUMN weekdays TEXT")
+        if 'weekdays' not in cols_c: conn.execute("ALTER TABLE custom_tasks ADD COLUMN weekdays TEXT")
         conn.commit()
 
-# --- ЛОГИКА ОПОВЕЩЕНИЙ ---
-def send_msg_threadsafe(text):
-    """Безопасная отправка сообщения через выделенный цикл событий"""
-    asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
-
+# --- ЛОГИКА ПЛАНИРОВЩИКА ---
 def check_and_send():
-    """Синхронная проверка в планировщике"""
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")
     
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    
-    try:
-        # 1. Дни Рождения (09:00 МСК)
+    with get_db_connection() as conn:
+        # 1. Дни Рождения (09:00:00 - 09:00:15)
         if now.hour == 9 and now.minute == 0 and 0 <= now.second <= 15:
             celebrants = [u for u in conn.execute("SELECT * FROM birthdays").fetchall() 
                           if str(u['bday']).strip().startswith(now_dm)]
             if celebrants:
-                msg = "🎉🫶🏼 Сегодня день рождения коллег:\n" + \
-                      "\n".join([f"• {u['full_name']}, {u['pos']}" for u in celebrants]) + "\n\n🎊"
+                msg = "🎉 Сегодня день рождения коллег:\n" + \
+                      "\n".join([f"• {u['full_name']}, {u['pos']}" for u in celebrants])
                 send_msg_threadsafe(msg)
 
-        # 2. Значимые события (ЗС)
+        # 2. Значимые события (ЗС) - Досылка и точное время
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
         for e in events:
             try:
@@ -92,8 +85,7 @@ def check_and_send():
                     send_msg_threadsafe(f"💡 {e['reminder_text']}")
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (e['id'],))
                     conn.commit()
-            except Exception as ex:
-                print(f"Ошибка даты ЗС: {ex}")
+            except Exception as ex: print(f"Ошибка ЗС {e['id']}: {ex}")
 
         # 3. Custom (Раз в минуту)
         if now.second < 15:
@@ -106,15 +98,12 @@ def check_and_send():
                 if (t['period'] == 'once' and t_dt_str == now_custom_dt) or \
                    (t['period'] == 'weekdays' and t_time == now_time_hm and current_weekday in (t['weekdays'] or "").split(',')):
                     send_msg_threadsafe(t['text'])
-    finally:
-        conn.close()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def normalize_date(val, include_seconds=True):
     if pd.isna(val): return ""
     try:
-        if isinstance(val, datetime):
-            dt_obj = val
+        if isinstance(val, datetime): dt_obj = val
         else:
             val_str = str(val).strip()
             for fmt in ["%d.%m.%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M", "%d.%m.%Y", "%Y-%m-%d"]:
@@ -127,20 +116,15 @@ def normalize_date(val, include_seconds=True):
     except: return str(val).strip()
 
 # --- WEB ROUTES ---
-@app.before_request
-def auth_middleware():
-    if request.endpoint not in ['login', 'static'] and not session.get('logged_in'):
-        return redirect(url_for('login'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
-        session['logged_in'] = True
-        return redirect(url_for('index'))
-    return '<html><body style="text-align:center;padding-top:100px;"><h2>Вход</h2><form method="post"><input type="password" name="password"><button>Вход</button></form></body></html>'
+@app.route('/test_send/<type>')
+def test_send(type):
+    send_msg_threadsafe(f"🛠 Тест связи ({type}): работает стабильно!")
+    flash(f"Тестовое сообщение ({type}) отправлено!")
+    return redirect(url_for('index'))
 
 @app.route('/')
 def index():
+    if not session.get('logged_in'): return redirect(url_for('login'))
     with get_db_connection() as conn:
         b = conn.execute("SELECT * FROM birthdays").fetchall()
         e = conn.execute("SELECT * FROM events ORDER BY is_sent ASC, dt DESC").fetchall()
@@ -190,6 +174,13 @@ def delete_custom(id):
         conn.commit()
     return redirect(url_for('index'))
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST' and request.form.get('password') == ADMIN_PASSWORD:
+        session['logged_in'] = True
+        return redirect(url_for('index'))
+    return '<html><body style="text-align:center;padding-top:100px;"><h2>Вход</h2><form method="post"><input type="password" name="password"><button>Вход</button></form></body></html>'
+
 @app.route('/download_template/<t_type>')
 def download_template(t_type):
     output = io.BytesIO()
@@ -198,7 +189,6 @@ def download_template(t_type):
     output.seek(0)
     return send_file(output, as_attachment=True, download_name=f"{t_type}.xlsx")
 
-# --- СТАРТ ---
 init_db()
 scheduler = BackgroundScheduler(timezone=MSK)
 scheduler.add_job(check_and_send, 'interval', seconds=10, max_instances=1)
