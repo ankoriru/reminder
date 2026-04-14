@@ -97,7 +97,7 @@ def check_and_send():
     try:
         # 1. ДНИ РОЖДЕНИЯ (09:00 МСК)
         # Проверяем каждую минуту в 09:00, чтобы не пропустить
-        if now.hour == 9 and now.minute == 0:
+        if now.hour == 20 and now.minute == 23:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
