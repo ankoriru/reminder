@@ -14,13 +14,11 @@
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 13px; }
         th { background: #f8f9fa; }
-        .flash { background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
-        .form-box { background: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #eee; margin-bottom: 20px; }
-        .btn-del { color: red; text-decoration: none; font-weight: bold; font-size: 16px; }
+        .flash { background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
-    <h2 style="text-align: center;">⚙️ Панель управления ботом</h2>
+    <h2 style="text-align: center;">⚙️ Панель управления</h2>
     
     {% with messages = get_flashed_messages() %}
       {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
@@ -35,13 +33,13 @@
     <div class="content">
         <div id="dr" class="tab active-tab">
             <h3>🎂 Дни Рождения</h3>
-            <a href="/download_template/dr" style="color:#007bff; text-decoration:none;">📥 Шаблон XLSX</a><br><br>
+            <a href="/download_template/dr" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Скачать шаблон</a><br><br>
             <form action="/upload_dr" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить список</button>
+                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить ДР</button>
             </form>
             <table>
-                <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата</th></tr>
+                <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата (ДД.ММ.ГГГГ)</th></tr>
                 {% for b in bdays %}
                 <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
                 {% endfor %}
@@ -50,14 +48,14 @@
 
         <div id="zs" class="tab">
             <h3>🔔 Значимые события</h3>
-            <p style="font-size: 12px; color: #666;">Формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС (Пример: 14.04.2026 12:00:00)</p>
-            <a href="/download_template/zs" style="color:#007bff; text-decoration:none;">📥 Шаблон XLSX</a><br><br>
+            <p style="font-size: 12px; color: #666;">Бот проверяет формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС</p>
+            <a href="/download_template/zs" style="color:#007bff; text-decoration:none; font-size:14px;">📥 Скачать шаблон</a><br><br>
             <form action="/upload_zs" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить базу</button>
+                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить ЗС</button>
             </form>
             <table>
-                <tr><th>Событие</th><th>Текст</th><th>Когда</th></tr>
+                <tr><th>Событие</th><th>Текст напоминания</th><th>Когда (Дата)</th></tr>
                 {% for e in evs %}
                 <tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>
                 {% endfor %}
@@ -66,37 +64,32 @@
 
         <div id="custom" class="tab">
             <h3>✍️ Custom напоминания</h3>
-            <div class="form-box">
-                <form action="/add_custom" method="post">
-                    <label>Сообщение:</label><br>
-                    <textarea name="text" style="width:100%; height: 50px;" required></textarea><br><br>
-                    <label>Время:</label><br>
-                    <input type="datetime-local" name="dt" required style="width:100%; margin-bottom: 10px;"><br>
-                    <label>Повтор:</label>
-                    <select name="period" id="period-select" onchange="toggleDays()" style="width:100%; padding: 8px;">
-                        <option value="once">Единоразово</option>
-                        <option value="workdays">Рабочие дни (Пн-Пт)</option>
-                        <option value="weekdays">Выбрать свои дни недели</option>
-                    </select>
-                    <div id="days-picker" style="display:none; margin-top:10px; padding: 10px; border: 1px dashed #ccc;">
-                        <label><input type="checkbox" name="days" value="0"> Пн</label>
-                        <label><input type="checkbox" name="days" value="1"> Вт</label>
-                        <label><input type="checkbox" name="days" value="2"> Ср</label>
-                        <label><input type="checkbox" name="days" value="3"> Чт</label>
-                        <label><input type="checkbox" name="days" value="4"> Пт</label>
-                        <label><input type="checkbox" name="days" value="5"> Сб</label>
-                        <label><input type="checkbox" name="days" value="6"> Вс</label>
-                    </div><br><br>
-                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer; width:100%;">💾 Сохранить</button>
-                </form>
-            </div>
+            <form action="/add_custom" method="post" style="background:#f9f9f9; padding:15px; border-radius:8px;">
+                <textarea name="text" style="width:100%; height:50px;" placeholder="Текст сообщения" required></textarea><br>
+                <input type="datetime-local" name="dt" required style="width:100%; margin:10px 0;"><br>
+                <select name="period" id="period-select" onchange="toggleDays()" style="width:100%; padding:8px;">
+                    <option value="once">Единоразово</option>
+                    <option value="workdays">Рабочие дни (Пн-Пт)</option>
+                    <option value="weekdays">Выбрать дни недели</option>
+                </select>
+                <div id="days-picker" style="display:none; margin-top:10px; padding:10px; border:1px dashed #ccc;">
+                    <label><input type="checkbox" name="days" value="0"> Пн</label>
+                    <label><input type="checkbox" name="days" value="1"> Вт</label>
+                    <label><input type="checkbox" name="days" value="2"> Ср</label>
+                    <label><input type="checkbox" name="days" value="3"> Чт</label>
+                    <label><input type="checkbox" name="days" value="4"> Пт</label>
+                    <label><input type="checkbox" name="days" value="5"> Сб</label>
+                    <label><input type="checkbox" name="days" value="6"> Вс</label>
+                </div><br>
+                <button type="submit" style="background:#28a745; color:white; border:none; width:100%; padding:10px; border-radius:5px; cursor:pointer; font-weight:bold;">💾 Сохранить</button>
+            </form>
             <table>
-                <tr><th>Текст</th><th>Когда/Время</th><th>Удалить</th></tr>
+                <tr><th>Текст</th><th>Время</th><th>Удалить</th></tr>
                 {% for c in customs %}
                 <tr>
                     <td>{{c.text}}</td>
                     <td>{{c.dt}}</td>
-                    <td><a href="/delete_custom/{{c.id}}" class="btn-del" onclick="return confirm('Удалить?')">❌</a></td>
+                    <td><a href="/delete_custom/{{c.id}}" style="color:red; text-decoration:none;" onclick="return confirm('Удалить?')">❌</a></td>
                 </tr>
                 {% endfor %}
             </table>
