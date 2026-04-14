@@ -2,23 +2,29 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Настройки</title>
+    <title>Бот Настройки</title>
     <style>
-        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f4f7f6; }
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f0f2f5; }
         .nav { display: flex; gap: 5px; margin-bottom: 20px; }
-        .nav button { padding: 10px 20px; border: none; background: #ddd; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .nav button { padding: 10px 20px; border: none; background: #fff; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .nav button.active { background: #007bff; color: white; }
-        .content { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .content { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .tab { display: none; }
         .active-tab { display: block; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
-        .flash { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; font-size: 13px; }
+        th { background: #f8f9fa; }
+        .flash { background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
         .form-box { background: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #eee; margin-bottom: 20px; }
+        .btn-del { color: red; text-decoration: none; font-weight: bold; font-size: 16px; }
     </style>
 </head>
 <body>
-    {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}{% endwith %}
+    <h2 style="text-align: center;">⚙️ Панель управления ботом</h2>
+    
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
 
     <div class="nav">
         <button onclick="showTab('dr')" id="btn-dr" class="active">ДР</button>
@@ -29,47 +35,49 @@
     <div class="content">
         <div id="dr" class="tab active-tab">
             <h3>🎂 Дни Рождения</h3>
-            <a href="/download_template/dr" style="color:#007bff; text-decoration:none;">📥 Скачать шаблон XLSX</a><br><br>
+            <a href="/download_template/dr" style="color:#007bff; text-decoration:none;">📥 Шаблон XLSX</a><br><br>
             <form action="/upload_dr" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit">Загрузить</button>
+                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить список</button>
             </form>
             <table>
                 <tr><th>ФИО</th><th>Должность</th><th>Отдел</th><th>Дата</th></tr>
-                {% for b in bdays %}<tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>{% endfor %}
+                {% for b in bdays %}
+                <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
+                {% endfor %}
             </table>
         </div>
 
         <div id="zs" class="tab">
             <h3>🔔 Значимые события</h3>
-            <a href="/download_template/zs" style="color:#007bff; text-decoration:none;">📥 Скачать шаблон XLSX</a><br><br>
+            <p style="font-size: 12px; color: #666;">Формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС (Пример: 14.04.2026 12:00:00)</p>
+            <a href="/download_template/zs" style="color:#007bff; text-decoration:none;">📥 Шаблон XLSX</a><br><br>
             <form action="/upload_zs" method="post" enctype="multipart/form-data">
                 <input type="file" name="file" accept=".xlsx" required>
-                <button type="submit">Загрузить</button>
+                <button type="submit" style="background:#007bff; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">Обновить базу</button>
             </form>
             <table>
                 <tr><th>Событие</th><th>Текст</th><th>Когда</th></tr>
-                {% for e in evs %}<tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>{% endfor %}
+                {% for e in evs %}
+                <tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>
+                {% endfor %}
             </table>
         </div>
 
         <div id="custom" class="tab">
-            <h3>✍️ Ручные уведомления</h3>
+            <h3>✍️ Custom напоминания</h3>
             <div class="form-box">
                 <form action="/add_custom" method="post">
-                    <label>Текст сообщения:</label><br>
+                    <label>Сообщение:</label><br>
                     <textarea name="text" style="width:100%; height: 50px;" required></textarea><br><br>
-                    
-                    <label>Время (и дата для единоразовых):</label><br>
+                    <label>Время:</label><br>
                     <input type="datetime-local" name="dt" required style="width:100%; margin-bottom: 10px;"><br>
-
-                    <label>Режим повтора:</label>
-                    <select name="period" id="period-select" onchange="toggleDays()" style="width:100%; padding: 5px;">
+                    <label>Повтор:</label>
+                    <select name="period" id="period-select" onchange="toggleDays()" style="width:100%; padding: 8px;">
                         <option value="once">Единоразово</option>
                         <option value="workdays">Рабочие дни (Пн-Пт)</option>
                         <option value="weekdays">Выбрать свои дни недели</option>
                     </select>
-
                     <div id="days-picker" style="display:none; margin-top:10px; padding: 10px; border: 1px dashed #ccc;">
                         <label><input type="checkbox" name="days" value="0"> Пн</label>
                         <label><input type="checkbox" name="days" value="1"> Вт</label>
@@ -79,17 +87,16 @@
                         <label><input type="checkbox" name="days" value="5"> Сб</label>
                         <label><input type="checkbox" name="days" value="6"> Вс</label>
                     </div><br><br>
-
-                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer;">💾 Сохранить</button>
+                    <button type="submit" style="background:#28a745; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer; width:100%;">💾 Сохранить</button>
                 </form>
             </div>
             <table>
-                <tr><th>Текст</th><th>Время</th><th>Удалить</th></tr>
+                <tr><th>Текст</th><th>Когда/Время</th><th>Удалить</th></tr>
                 {% for c in customs %}
                 <tr>
                     <td>{{c.text}}</td>
                     <td>{{c.dt}}</td>
-                    <td><a href="/delete_custom/{{c.id}}" style="color:red; text-decoration:none;" onclick="return confirm('Удалить?')">❌</a></td>
+                    <td><a href="/delete_custom/{{c.id}}" class="btn-del" onclick="return confirm('Удалить?')">❌</a></td>
                 </tr>
                 {% endfor %}
             </table>
