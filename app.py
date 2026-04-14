@@ -29,7 +29,6 @@ def get_db_connection():
 
 def init_db():
     with get_db_connection() as conn:
-        # Базовая структура
         conn.execute('''CREATE TABLE IF NOT EXISTS birthdays 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT, pos TEXT, dep TEXT, bday TEXT)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS events 
@@ -37,41 +36,39 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT)''')
         
-        # Исправление таблицы events (ЗС)
+        # Миграция: Проверка и добавление колонок для ЗС
         cursor = conn.execute("PRAGMA table_info(events)")
         cols = [row[1] for row in cursor.fetchall()]
-        if 'event_name' not in cols:
-            conn.execute("ALTER TABLE events ADD COLUMN event_name TEXT")
-        if 'reminder_text' not in cols:
-            conn.execute("ALTER TABLE events ADD COLUMN reminder_text TEXT")
-            
-        # Исправление таблицы custom_tasks
-        cursor = conn.execute("PRAGMA table_info(custom_tasks)")
-        cols_c = [row[1] for row in cursor.fetchall()]
-        if 'weekdays' not in cols_c:
-            conn.execute("ALTER TABLE custom_tasks ADD COLUMN weekdays TEXT")
+        if 'event_name' not in cols: conn.execute("ALTER TABLE events ADD COLUMN event_name TEXT")
+        if 'reminder_text' not in cols: conn.execute("ALTER TABLE events ADD COLUMN reminder_text TEXT")
+        
+        # Миграция: Проверка и добавление колонок для CUSTOM
+        cursor_c = conn.execute("PRAGMA table_info(custom_tasks)")
+        cols_c = [row[1] for row in cursor_c.fetchall()]
+        if 'weekdays' not in cols_c: conn.execute("ALTER TABLE custom_tasks ADD COLUMN weekdays TEXT")
         conn.commit()
 
-# --- ЛОГИКА БОТА ---
+# --- ЛОГИКА ОТПРАВКИ ---
 async def send_to_tg(text):
     try:
         await bot.send_message(CHAT_ID, text)
     except Exception as e:
-        print(f"Ошибка TG: {e}")
+        print(f"Ошибка отправки в TG: {e}")
 
 def check_and_send():
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")
-    now_full = now.strftime("%d.%m.%y %H:%M")
+    now_full_sec = now.strftime("%d.%m.%Y %H:%M:%S") # Формат для ЗС
+    now_full_min = now.strftime("%d.%m.%y %H:%M")   # Формат для Custom (разово)
     now_time = now.strftime("%H:%M")
-    current_weekday = str(now.weekday()) # 0=Пн, 4=Пт, 6=Вс
+    current_weekday = str(now.weekday())
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     with get_db_connection() as conn:
-        # 1. Дни рождения (09:00 МСК)
-        if now.hour == 9 and now.minute == 0:
+        # 1. Дни Рождения (09:00:00 МСК)
+        if now.hour == 9 and now.minute == 0 and now.second == 0:
             users = conn.execute("SELECT * FROM birthdays WHERE bday = ?", (now_dm,)).fetchall()
             if users:
                 msg = "🎉🫶🏼Сегодня день рождения наших коллег:\n"
@@ -80,23 +77,22 @@ def check_and_send():
                 msg += "Поздравляем 😊🎊"
                 loop.run_until_complete(send_to_tg(msg))
 
-        # 2. Значимые события (ЗС)
-        evs = conn.execute("SELECT * FROM events WHERE dt = ?", (now_full,)).fetchall()
+        # 2. Значимые события (По секундному совпадению)
+        evs = conn.execute("SELECT * FROM events WHERE dt = ?", (now_full_sec,)).fetchall()
         for e in evs:
             loop.run_until_complete(send_to_tg(f"💡 {e['reminder_text']}"))
 
-        # 3. Custom напоминания
-        custs = conn.execute("SELECT * FROM custom_tasks").fetchall()
-        for c in custs:
-            # Извлекаем время из сохраненной даты (формат ДД.ММ.ГГ ЧЧ:ММ)
-            c_time = c['dt'].split(' ')[1] if ' ' in c['dt'] else ""
-            
-            if c['period'] == 'once' and c['dt'] == now_full:
-                loop.run_until_complete(send_to_tg(c['text']))
-            elif c['period'] == 'weekdays' and c_time == now_time:
-                allowed_days = c['weekdays'].split(',') if c['weekdays'] else []
-                if current_weekday in allowed_days:
-                    loop.run_until_complete(send_to_tg(c['text']))
+        # 3. CUSTOM уведомления (Проверка раз в минуту на 00 секунде)
+        if now.second == 0:
+            tasks = conn.execute("SELECT * FROM custom_tasks").fetchall()
+            for t in tasks:
+                t_time = t['dt'].split(' ')[1] if ' ' in t['dt'] else ""
+                if t['period'] == 'once' and t['dt'] == now_full_min:
+                    loop.run_until_complete(send_to_tg(t['text']))
+                elif t['period'] == 'weekdays' and t_time == now_time:
+                    allowed = t['weekdays'].split(',') if t['weekdays'] else []
+                    if current_weekday in allowed:
+                        loop.run_until_complete(send_to_tg(t['text']))
     loop.close()
 
 # --- ROUTES ---
@@ -112,7 +108,7 @@ def login():
             session['logged_in'] = True
             return redirect(url_for('index'))
         flash("Неверный пароль")
-    return '<html><body style="text-align:center;padding-top:100px;font-family:sans-serif;"><h2>Вход</h2><form method="post"><input type="password" name="password" style="padding:10px;"><button style="padding:10px;">Войти</button></form></body></html>'
+    return '<html><body style="text-align:center;padding-top:100px;font-family:sans-serif;"><h2>Вход</h2><form method="post"><input type="password" name="password" style="padding:10px;"><button style="padding:10px 20px;">Войти</button></form></body></html>'
 
 @app.route('/')
 def index():
@@ -126,17 +122,15 @@ def index():
 def download_template(t_type):
     output = io.BytesIO()
     if t_type == 'dr':
-        df = pd.DataFrame(columns=['ФИО', 'Должность', 'Подразделение', 'Дата (ДД.ММ)'])
+        df = pd.DataFrame(columns=['ФИО', 'Должность', 'Отдел', 'Дата (ДД.ММ)'])
         df.loc[0] = ['Иванов Иван', 'Менеджер', 'ИТ', '14.04']
-        name = "template_DR.xlsx"
     else:
-        df = pd.DataFrame(columns=['Событие', 'Напоминание', 'Дата (ДД.ММ.ГГ ЧЧ:ММ)'])
-        df.loc[0] = ['Событие 1', '💡 Текст уведомления', '14.04.26 15:30']
-        name = "template_ZS.xlsx"
+        df = pd.DataFrame(columns=['Событие', 'Текст напоминания', 'Дата (ДД.ММ.ГГГГ ЧЧ:ММ:СС)'])
+        df.loc[0] = ['Событие 1', '💡 Текст сообщения', '14.04.2026 12:00:00']
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False)
     output.seek(0)
-    return send_file(output, as_attachment=True, download_name=name)
+    return send_file(output, as_attachment=True, download_name=f"template_{t_type}.xlsx")
 
 @app.route('/upload_dr', methods=['POST'])
 def upload_dr():
@@ -151,7 +145,7 @@ def upload_dr():
                                  (str(r.iloc[0]), str(r.iloc[1]), str(r.iloc[2]), str(r.iloc[3])))
                 conn.commit()
             flash("База ДР обновлена")
-        except Exception as e: flash(f"Ошибка: {e}")
+        except Exception as e: flash(f"Ошибка ДР: {e}")
     return redirect(url_for('index'))
 
 @app.route('/upload_zs', methods=['POST'])
@@ -167,30 +161,22 @@ def upload_zs():
                                  (str(r.iloc[0]), str(r.iloc[1]), str(r.iloc[2])))
                 conn.commit()
             flash("База ЗС обновлена")
-        except Exception as e: flash(f"Ошибка загрузки ЗС: {e}")
+        except Exception as e: flash(f"Ошибка ЗС: {e}")
     return redirect(url_for('index'))
 
 @app.route('/add_custom', methods=['POST'])
 def add_custom():
     try:
-        text = request.form.get('text')
-        dt_raw = request.form.get('dt')
-        period = request.form.get('period')
+        text, dt_raw, period = request.form.get('text'), request.form.get('dt'), request.form.get('period')
         days = request.form.getlist('days')
-
-        if period == 'workdays':
-            days = ['0','1','2','3','4']
-            period = 'weekdays'
-        
-        days_str = ",".join(days)
+        if period == 'workdays': days = ['0','1','2','3','4']
         dt_obj = datetime.strptime(dt_raw, '%Y-%m-%dT%H:%M')
         dt_final = dt_obj.strftime('%d.%m.%y %H:%M')
-        
         with get_db_connection() as conn:
             conn.execute("INSERT INTO custom_tasks (text, dt, period, weekdays) VALUES (?,?,?,?)", 
-                         (text, dt_final, period, days_str))
+                         (text, dt_final, 'weekdays' if period != 'once' else 'once', ",".join(days)))
             conn.commit()
-        flash("Добавлено")
+        flash("Custom добавлено")
     except Exception as e: flash(f"Ошибка: {e}")
     return redirect(url_for('index'))
 
@@ -202,9 +188,10 @@ def delete_custom(id):
     flash("Удалено")
     return redirect(url_for('index'))
 
+# --- ИНИЦИАЛИЗАЦИЯ ---
 init_db()
 scheduler = BackgroundScheduler(timezone=MSK)
-scheduler.add_job(check_and_send, 'interval', minutes=1)
+scheduler.add_job(check_and_send, 'interval', seconds=1) # Проверка каждую секунду
 scheduler.start()
 
 if __name__ == "__main__":
