@@ -2,5 +2,5 @@ flask
 aiogram
 apscheduler
 pandas
-openpyxl
+openpyxl==3.1.2
 pytz
