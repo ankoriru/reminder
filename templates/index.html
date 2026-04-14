@@ -3,126 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Панель управления Ботом</title>
+    <title>Панель управления IT-Ботом</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f0f2f5; color: #333; }
-        h2 { text-align: center; color: #1c1e21; margin-bottom: 30px; }
-        
-        /* Навигация */
-        .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; }
-        .nav button { padding: 12px 25px; cursor: pointer; border: none; background: #fff; border-radius: 8px; font-weight: bold; transition: 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .nav button.active { background: #007bff; color: white; }
-        .nav button:hover:not(.active) { background: #e4e6eb; }
+        :root {
+            --primary-color: #007bff;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-main: #1c1e21;
+            --text-muted: #606770;
+        }
 
-        /* Контент */
-        .content { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-        .tab { display: none; }
+        body { 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            max-width: 1000px; 
+            margin: auto; 
+            padding: 20px; 
+            background-color: var(--bg-color); 
+            color: var(--text-main);
+            line-height: 1.5;
+        }
+
+        h2 { text-align: center; color: var(--text-main); margin-bottom: 30px; font-weight: 700; }
+
+        /* Навигация */
+        .nav { display: flex; justify-content: center; gap: 12px; margin-bottom: 25px; }
+        .nav button { 
+            padding: 12px 28px; 
+            cursor: pointer; 
+            border: none; 
+            background: var(--card-bg); 
+            border-radius: 10px; 
+            font-weight: 600; 
+            transition: all 0.3s ease; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            color: var(--text-muted);
+        }
+        .nav button.active { background: var(--primary-color); color: white; box-shadow: 0 4px 12px rgba(0,123,255,0.3); }
+        .nav button:hover:not(.active) { transform: translateY(-2px); background: #e4e6eb; }
+
+        /* Контентные блоки */
+        .content { background: var(--card-bg); padding: 35px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+        .tab { display: none; animation: fadeIn 0.4s ease; }
         .active-tab { display: block; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         /* Таблицы */
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #fff; }
-        th, td { border: 1px solid #dee2e6; padding: 12px; text-align: left; font-size: 14px; }
-        th { background: #f8f9fa; color: #495057; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
+        .table-container { overflow-x: auto; margin-top: 25px; border-radius: 8px; border: 1px solid #eee; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 12px; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background-color: #fcfcfc; }
 
-        /* Формы и элементы */
-        .flash { padding: 15px; background: #d4edda; color: #155724; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb; font-weight: bold; text-align: center; }
-        .btn-template { display: inline-block; margin-bottom: 20px; padding: 10px 15px; background: #e7f3ff; color: #007bff; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #cce4ff; transition: 0.2s; }
+        /* Сообщения */
+        .flash { padding: 15px; background: #d4edda; color: #155724; border-radius: 10px; margin-bottom: 25px; border: 1px solid #c3e6cb; text-align: center; font-weight: 500; }
+
+        /* Формы */
+        .form-box { background: #f8f9fa; padding: 25px; border-radius: 12px; border: 1px solid #eaebed; margin-bottom: 30px; }
+        .btn-template { display: inline-flex; align-items: center; margin-bottom: 20px; padding: 10px 18px; background: #e7f3ff; color: var(--primary-color); text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; transition: 0.2s; }
         .btn-template:hover { background: #d1e7ff; }
-        
-        .form-box { background: #f8f9fa; padding: 20px; border-radius: 10px; border: 1px solid #eee; margin-bottom: 25px; }
-        textarea, input, select { padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100%; box-sizing: border-box; margin-top: 5px; margin-bottom: 15px; }
-        
-        button[type="submit"] { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
-        button[type="submit"]:hover { background: #218838; }
 
-        .btn-del { color: #dc3545; text-decoration: none; font-weight: bold; font-size: 18px; transition: 0.2s; }
-        .btn-del:hover { color: #a71d2a; }
+        textarea, input, select { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 8px 0 18px 0; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            box-sizing: border-box; 
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        textarea:focus, input:focus { border-color: var(--primary-color); outline: none; }
+        
+        .btn-submit { background: var(--success-color); color: white; border: none; padding: 14px 25px; border-radius: 8px; cursor: pointer; font-weight: 700; width: 100%; font-size: 16px; }
+        .btn-submit:hover { background: #218838; filter: brightness(1.05); }
 
-        /* Чекбоксы для дней недели */
-        .days-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; padding: 10px; border: 1px dashed #ccc; border-radius: 6px; background: #fff; margin-bottom: 15px; }
-        .days-grid label { font-size: 13px; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+        .btn-upload { background: var(--primary-color); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+
+        /* Статусы и кнопки действий */
+        .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .status-sent { background: #d4edda; color: #155724; }
+        .status-wait { background: #fff3cd; color: #856404; }
+        
+        .btn-del { color: var(--danger-color); text-decoration: none; font-size: 18px; padding: 5px; }
+        .btn-del:hover { background: #fff5f5; border-radius: 5px; }
+
+        /* Дни недели */
+        .days-selector { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; background: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 15px; }
+        .days-selector label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
     </style>
 </head>
 <body>
 
-    <h2>🤖 Управление уведомлениями</h2>
+    <h2>⚙️ IT-Showcase Notification Center</h2>
     
     {% with messages = get_flashed_messages() %}
       {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
     {% endwith %}
 
     <div class="nav">
-        <button onclick="showTab('dr')" id="btn-dr" class="active">ДР</button>
-        <button onclick="showTab('zs')" id="btn-zs">ЗС</button>
-        <button onclick="showTab('custom')" id="btn-custom">CUSTOM</button>
+        <button onclick="showTab('dr')" id="btn-dr" class="active">🎂 Дни рождения</button>
+        <button onclick="showTab('zs')" id="btn-zs">🔔 Значимые события</button>
+        <button onclick="showTab('custom')" id="btn-custom">✍️ Custom уведомления</button>
     </div>
 
     <div class="content">
         <div id="dr" class="tab active-tab">
-            <h3>🎂 Дни Рождения</h3>
-            <p style="font-size: 13px; color: #666;">Бот поздравит коллег в 09:00 по МСК (проверка по ДД.ММ).</p>
-            <a href="/download_template/dr" class="btn-template">📥 Скачать шаблон ДР</a>
+            <h3>Управление списком ДР</h3>
+            <p style="color: var(--text-muted); font-size: 14px;">Бот автоматически поздравляет коллег в <b>09:00 (МСК)</b>.</p>
+            <a href="/download_template/dr" class="btn-template">📥 Скачать шаблон XLSX</a>
             
-            <form action="{{ url_for('upload_dr') }}" method="post" enctype="multipart/form-data">
-                <input type="file" name="file" accept=".xlsx" required style="width: auto; margin-bottom: 10px;">
-                <button type="submit" style="width: auto; background: #007bff;">🚀 Обновить список ДР</button>
-            </form>
+            <div class="form-box">
+                <form action="/upload_dr" method="post" enctype="multipart/form-data">
+                    <label>Выберите файл Excel:</label>
+                    <input type="file" name="file" accept=".xlsx" required style="border: none; padding: 10px 0;">
+                    <button type="submit" class="btn-upload">🚀 Обновить базу данных</button>
+                </form>
+            </div>
 
-            <table>
-                <thead>
-                    <tr><th>ФИО</th><th>Должность</th><th>Подразделение</th><th>Дата</th></tr>
-                </thead>
-                <tbody>
-                    {% for b in bdays %}
-                    <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>ФИО</th><th>Должность</th><th>Подразделение</th><th>Дата (ДД.ММ)</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for b in bdays %}
+                        <tr><td>{{b.full_name}}</td><td>{{b.pos}}</td><td>{{b.dep}}</td><td>{{b.bday}}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div id="zs" class="tab">
-            <h3>🔔 Значимые события (ЗС)</h3>
-            <p style="font-size: 13px; color: #666;">Бот отправит сообщение точно в указанную секунду (ДД.ММ.ГГГГ ЧЧ:ММ:СС).</p>
-            <a href="/download_template/zs" class="btn-template">📥 Скачать шаблон ЗС</a>
+            <h3>Значимые события и дедлайны</h3>
+            <p style="color: var(--text-muted); font-size: 14px;">Оповещения уходят в точно указанное время. Бот проверяет пропущенные задания.</p>
+            <a href="/download_template/zs" class="btn-template">📥 Скачать шаблон XLSX</a>
             
-            <form action="{{ url_for('upload_zs') }}" method="post" enctype="multipart/form-data">
-                <input type="file" name="file" accept=".xlsx" required style="width: auto; margin-bottom: 10px;">
-                <button type="submit" style="width: auto; background: #007bff;">🚀 Обновить базу ЗС</button>
-            </form>
+            <div class="form-box">
+                <form action="/upload_zs" method="post" enctype="multipart/form-data">
+                    <label>Загрузить новый график:</label>
+                    <input type="file" name="file" accept=".xlsx" required style="border: none; padding: 10px 0;">
+                    <button type="submit" class="btn-upload">🔄 Синхронизировать события</button>
+                </form>
+            </div>
 
-            <table>
-                <thead>
-                    <tr><th>Событие</th><th>Текст напоминания</th><th>Когда (Дата)</th></tr>
-                </thead>
-                <tbody>
-                    {% for e in evs %}
-                    <tr><td>{{e.event_name}}</td><td>{{e.reminder_text}}</td><td>{{e.dt}}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>Событие</th><th>Время отправки</th><th>Статус</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for e in evs %}
+                        <tr>
+                            <td><b>{{e.event_name}}</b><br><small style="color: #666;">{{e.reminder_text}}</small></td>
+                            <td>{{e.dt}}</td>
+                            <td>
+                                {% if e.is_sent == 1 %}
+                                <span class="status-badge status-sent">Отправлено ✅</span>
+                                {% else %}
+                                <span class="status-badge status-wait">В очереди ⏳</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div id="custom" class="tab">
-            <h3>✍️ Custom напоминания</h3>
+            <h3>Ручное планирование уведомлений</h3>
             <div class="form-box">
-                <form action="{{ url_for('add_custom') }}" method="post">
-                    <label>Текст сообщения:</label>
-                    <textarea name="text" placeholder="Введите текст, который бот отправит в чат..." required></textarea>
+                <form action="/add_custom" method="post">
+                    <label>Текст уведомления:</label>
+                    <textarea name="text" placeholder="Напишите текст сообщения..." required></textarea>
                     
-                    <label>Время (и дата для единоразовых):</label>
-                    <input type="datetime-local" name="dt" required title="Выберите дату и время">
+                    <label>Дата и время первого запуска:</label>
+                    <input type="datetime-local" name="dt" required>
                     
-                    <label>Режим повтора:</label>
+                    <label>Режим повторения:</label>
                     <select name="period" id="period-select" onchange="toggleDays()">
-                        <option value="once">Единоразово (в указанную дату)</option>
+                        <option value="once">Единоразово</option>
                         <option value="workdays">Рабочие дни (Пн-Пт)</option>
-                        <option value="weekdays">Выбрать свои дни недели</option>
+                        <option value="weekdays">Выбранные дни недели</option>
                     </select>
 
                     <div id="days-picker" style="display:none;">
-                        <label>Выберите дни:</label>
-                        <div class="days-grid">
+                        <label>Выберите дни недели:</label>
+                        <div class="days-selector">
                             <label><input type="checkbox" name="days" value="0"> Пн</label>
                             <label><input type="checkbox" name="days" value="1"> Вт</label>
                             <label><input type="checkbox" name="days" value="2"> Ср</label>
@@ -133,39 +205,41 @@
                         </div>
                     </div>
 
-                    <button type="submit">✅ Сохранить уведомление</button>
+                    <button type="submit" class="btn-submit">💾 Сохранить и поставить в график</button>
                 </form>
             </div>
 
-            <table>
-                <thead>
-                    <tr><th>Сообщение</th><th>Время/Дата</th><th>Удалить</th></tr>
-                </thead>
-                <tbody>
-                    {% for c in customs %}
-                    <tr>
-                        <td>{{c.text}}</td>
-                        <td>{{c.dt}}</td>
-                        <td style="text-align: center;"><a href="/delete_custom/{{c.id}}" class="btn-del" onclick="return confirm('Вы уверены, что хотите удалить это напоминание?')">❌</a></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>Текст сообщения</th><th>Время / График</th><th style="text-align: center;">Удалить</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for c in customs %}
+                        <tr>
+                            <td>{{c.text}}</td>
+                            <td>{{c.dt}}</td>
+                            <td style="text-align: center;">
+                                <a href="/delete_custom/{{c.id}}" class="btn-del" onclick="return confirm('Удалить это напоминание?')">🗑️</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
     <script>
-        function showTab(name) {
-            // Переключение вкладок
+        function showTab(id) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active-tab'));
             document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
             
-            document.getElementById(name).classList.add('active-tab');
-            document.getElementById('btn-' + name).classList.add('active');
+            document.getElementById(id).classList.add('active-tab');
+            document.getElementById('btn-' + id).classList.add('active');
         }
 
         function toggleDays() {
-            // Показ/скрытие выбора дней недели
             const val = document.getElementById('period-select').value;
             const picker = document.getElementById('days-picker');
             picker.style.display = (val === 'weekdays') ? 'block' : 'none';
