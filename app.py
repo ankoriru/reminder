@@ -58,8 +58,6 @@ def init_db():
             (id INTEGER PRIMARY KEY AUTOINCREMENT, event_name TEXT, reminder_text TEXT, dt TEXT, is_sent INTEGER DEFAULT 0)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT, last_sent TEXT)''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
-            (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, sent_at TEXT, UNIQUE(type, ref_id, sent_date))''')
         
         # Migrations
         cursor = conn.execute("PRAGMA table_info(events)")
@@ -74,72 +72,34 @@ def init_db():
         if 'last_sent' not in cols_c:
             conn.execute("ALTER TABLE custom_tasks ADD COLUMN last_sent TEXT")
         
-        # Migration for sent_log table
-        cursor_sl = conn.execute("PRAGMA table_info(sent_log)")
-        cols_sl = [row[1] for row in cursor_sl.fetchall()]
-        if 'sent_at' not in cols_sl:
-            conn.execute("ALTER TABLE sent_log ADD COLUMN sent_at TEXT")
-        
         conn.commit()
 
-def is_already_sent_recently(conn, notif_type, ref_id, minutes=15):
-    """Проверка, было ли уже отправлено уведомление за последние N минут"""
-    cursor = conn.execute(
-        "SELECT sent_at FROM sent_log WHERE type = ? AND ref_id = ? ORDER BY id DESC LIMIT 1",
-        (notif_type, ref_id)
-    )
-    row = cursor.fetchone()
-    if not row or not row['sent_at']:
-        return False
-    
-    try:
-        last_sent = datetime.strptime(row['sent_at'], "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-        diff = now - last_sent
-        return diff.total_seconds() < (minutes * 60)
-    except:
-        return False
 
-def mark_as_sent(conn, notif_type, ref_id, today_str):
-    """Отметить уведомление как отправленное"""
-    try:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            "INSERT INTO sent_log (type, ref_id, sent_date, sent_at) VALUES (?, ?, ?, ?)",
-            (notif_type, ref_id, today_str, now_str)
-        )
-        conn.commit()
-    except:
-        pass
 
 # --- SCHEDULER ---
 def check_and_send():
     """Проверка и отправка уведомлений"""
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")
-    today_str = now.strftime("%Y-%m-%d")
     current_weekday = now.weekday()
     now_time_hm = now.strftime("%H:%M")
     
     conn = get_db_connection()
     try:
-        # 1. BIRTHDAYS (09:00 MSK)
-        if now.hour == 21 and now.minute <= 21:
+        # 1. BIRTHDAYS (09:00 MSK) - отправляем один раз в 09:00
+        if now.hour == 21 and now.minute == 28:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
                 if bday_str and bday_str.startswith(now_dm):
-                    # Проверяем, не отправляли ли за последние 15 минут
-                    if not is_already_sent_recently(conn, 'birthday', person['id'], minutes=2):
-                        birthday_people.append(person)
+                    birthday_people.append(person)
             
             if birthday_people:
                 msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
                 for person in birthday_people:
                     msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
-                    mark_as_sent(conn, 'birthday', person['id'], today_str)
                 msg_lines.append("Поздравляем 😊🎊")
                 send_msg_threadsafe("\n".join(msg_lines))
         
