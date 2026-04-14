@@ -12,7 +12,7 @@ from aiogram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- КОНФИГУРАЦИЯ ---
-# Все переменные из окружения
+# Все переменные из окружения (без fallback значений)
 TOKEN = os.getenv('TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
@@ -46,7 +46,8 @@ def send_msg_threadsafe(text):
         except Exception as e:
             print(f"[ERROR] Ошибка отправки сообщения: {e}")
     else:
-        print(f"[NOT CONFIGURED] Message: {text}")
+        print(f"[NOT CONFIGURED] TOKEN={TOKEN is not None}, CHAT_ID={CHAT_ID is not None}")
+        print(f"[MESSAGE] {text[:50]}...")
 
 # --- БАЗА ДАННЫХ И МИГРАЦИИ ---
 def get_db_connection():
@@ -90,22 +91,28 @@ def check_and_send():
     now_dm = now.strftime("%d.%m")  # Текущий день и месяц для ДР (ДД.ММ)
     current_weekday = now.weekday()  # 0=Пн, 6=Вс
     now_time_hm = now.strftime("%H:%M")  # Текущее время ЧЧ:ММ
+    now_str = now.strftime("%d.%m.%Y %H:%M:%S")
     
-    print(f"[CHECK] {now.strftime('%d.%m.%Y %H:%M:%S')} MSK - checking notifications...")
+    print(f"\n[{'='*50}]")
+    print(f"[CHECK] {now_str} MSK")
+    print(f"[INFO] now_dm={now_dm}, weekday={current_weekday}, time={now_time_hm}")
     
     conn = get_db_connection()
     try:
         # 1. ДНИ РОЖДЕНИЯ (09:00 МСК)
-        # Проверяем каждую минуту в 09:00, чтобы не пропустить
-        if now.hour == 20 and now.minute == 23:
+        print(f"\n[BDAY CHECK] hour={now.hour}, minute={now.minute}")
+        if now.hour == 20 and now.minute == 30:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
+            print(f"[BDAY] Found {len(celebrants)} total birthdays in DB")
             birthday_people = []
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
+                print(f"[BDAY] Checking: {person['full_name']}, bday='{bday_str}', now_dm='{now_dm}'")
                 # Проверяем совпадение ДД.ММ
                 if bday_str and bday_str.startswith(now_dm):
                     birthday_people.append(person)
+                    print(f"[BDAY] MATCH! {person['full_name']}")
             
             if birthday_people:
                 # Формируем сообщение согласно ТЗ
@@ -115,18 +122,34 @@ def check_and_send():
                 msg_lines.append("Поздравляем 😊🎊")
                 msg = "\n".join(msg_lines)
                 send_msg_threadsafe(msg)
-                print(f"[BIRTHDAY] Sent to {len(birthday_people)} people")
+                print(f"[BDAY SENT] Message sent for {len(birthday_people)} people")
+            else:
+                print(f"[BDAY] No birthdays today")
+        else:
+            print(f"[BDAY SKIP] Not 09:00 (current: {now.hour}:{now.minute:02d})")
         
         # 2. ЗНАЧИМЫЕ СОБЫТИЯ (ЗС) - Точное время
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
+        print(f"\n[EVENTS] Found {len(events)} unsent events")
+        
         for event in events:
             try:
                 event_dt_str = event['dt']
+                print(f"[EVENT] id={event['id']}, dt='{event_dt_str}', name='{event['event_name']}'")
+                
                 if not event_dt_str:
+                    print(f"[EVENT SKIP] Empty dt")
                     continue
-                    
+                
                 # Парсим дату события
-                event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
+                try:
+                    event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
+                except ValueError as e:
+                    print(f"[EVENT ERROR] Cannot parse date '{event_dt_str}': {e}")
+                    continue
+                
+                print(f"[EVENT] Parsed: {event_dt.strftime('%d.%m.%Y %H:%M:%S')}, Now: {now_str}")
+                print(f"[EVENT] event_dt <= now: {event_dt <= now}")
                 
                 # Сравниваем с текущим временем
                 if event_dt <= now:
@@ -134,18 +157,26 @@ def check_and_send():
                     send_msg_threadsafe(msg)
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
                     conn.commit()
-                    print(f"[EVENT] Sent event id={event['id']}: {event['event_name']}")
+                    print(f"[EVENT SENT] id={event['id']}: {event['event_name']}")
+                else:
+                    print(f"[EVENT WAIT] Event time not reached yet")
+                    
             except Exception as ex:
-                print(f"[ERROR] Ошибка обработки события {event['id']}: {ex}")
+                print(f"[EVENT ERROR] id={event['id']}: {ex}")
+                import traceback
+                traceback.print_exc()
         
         # 3. CUSTOM ЗАДАЧИ
         custom_tasks = conn.execute("SELECT * FROM custom_tasks").fetchall()
+        print(f"\n[CUSTOM] Found {len(custom_tasks)} custom tasks")
+        
         for task in custom_tasks:
             try:
                 task_dt_str = str(task['dt']).strip() if task['dt'] else ""
                 if not task_dt_str:
+                    print(f"[CUSTOM SKIP] id={task['id']}: Empty dt")
                     continue
-                    
+                
                 period = task['period']
                 weekdays_str = task['weekdays'] or ""
                 last_sent = task['last_sent']
@@ -156,68 +187,77 @@ def check_and_send():
                 # Проверяем, не отправляли ли уже в эту минуту
                 current_minute = now.strftime("%d.%m.%Y %H:%M")
                 if last_sent == current_minute:
+                    print(f"[CUSTOM SKIP] id={task['id']}: Already sent this minute")
                     continue
                 
+                print(f"[CUSTOM] id={task['id']}, period={period}, dt='{task_dt_str}', time='{task_time}'")
+                
                 should_send = False
+                reason = ""
                 
                 if period == 'once':
                     # Разовая задача - проверяем точное совпадение даты и времени
-                    if task_dt_str == current_minute:
-                        should_send = True
+                    should_send = task_dt_str == current_minute
+                    reason = f"once: {task_dt_str} == {current_minute}"
                 
                 elif period == 'daily':
                     # Каждый день в указанное время
-                    if task_time == now_time_hm:
-                        should_send = True
+                    should_send = task_time == now_time_hm
+                    reason = f"daily: {task_time} == {now_time_hm}"
                 
                 elif period == 'workdays':
                     # Рабочие дни (Пн-Пт) в указанное время
-                    if current_weekday < 5 and task_time == now_time_hm:  # 0-4 = Пн-Пт
-                        should_send = True
+                    should_send = current_weekday < 5 and task_time == now_time_hm
+                    reason = f"workdays: weekday={current_weekday}<5, {task_time}=={now_time_hm}"
                 
                 elif period == 'weekdays':
                     # Выбранные дни недели
                     selected_days = weekdays_str.split(',') if weekdays_str else []
-                    if str(current_weekday) in selected_days and task_time == now_time_hm:
-                        should_send = True
+                    should_send = str(current_weekday) in selected_days and task_time == now_time_hm
+                    reason = f"weekdays: {current_weekday} in {selected_days}, {task_time}=={now_time_hm}"
                 
                 elif period == 'weekly':
                     # Каждую неделю - проверяем день недели и время
                     task_start = datetime.strptime(task_dt_str, "%d.%m.%Y %H:%M")
-                    if task_start.weekday() == current_weekday and task_time == now_time_hm:
-                        should_send = True
+                    should_send = task_start.weekday() == current_weekday and task_time == now_time_hm
+                    reason = f"weekly: task_weekday={task_start.weekday()}=={current_weekday}, {task_time}=={now_time_hm}"
                 
                 elif period == 'monthly':
                     # Каждый месяц - проверяем день месяца и время
                     task_start = datetime.strptime(task_dt_str, "%d.%m.%Y %H:%M")
-                    if task_start.day == now.day and task_time == now_time_hm:
-                        should_send = True
+                    should_send = task_start.day == now.day and task_time == now_time_hm
+                    reason = f"monthly: task_day={task_start.day}=={now.day}, {task_time}=={now_time_hm}"
                 
                 elif period == 'yearly':
                     # Каждый год - проверяем день и месяц
                     task_start = datetime.strptime(task_dt_str, "%d.%m.%Y %H:%M")
                     task_dm = task_start.strftime("%d.%m")
                     now_dm_check = now.strftime("%d.%m")
-                    if task_dm == now_dm_check and task_time == now_time_hm:
-                        should_send = True
+                    should_send = task_dm == now_dm_check and task_time == now_time_hm
+                    reason = f"yearly: {task_dm}=={now_dm_check}, {task_time}=={now_time_hm}"
+                
+                print(f"[CUSTOM] id={task['id']}: should_send={should_send}, reason={reason}")
                 
                 if should_send:
                     send_msg_threadsafe(task['text'])
                     conn.execute("UPDATE custom_tasks SET last_sent = ? WHERE id = ?", (current_minute, task['id']))
                     conn.commit()
-                    print(f"[CUSTOM] Sent task id={task['id']}: {task['text'][:30]}...")
+                    print(f"[CUSTOM SENT] id={task['id']}: {task['text'][:30]}...")
                     
                     # Для разовых задач удаляем после отправки
                     if period == 'once':
                         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
                         conn.commit()
-                        print(f"[CUSTOM] Deleted one-time task id={task['id']}")
+                        print(f"[CUSTOM DELETED] one-time task id={task['id']}")
             
             except Exception as ex:
-                print(f"[ERROR] Ошибка обработки custom задачи {task['id']}: {ex}")
+                print(f"[CUSTOM ERROR] id={task['id']}: {ex}")
+                import traceback
+                traceback.print_exc()
     
     finally:
         conn.close()
+        print(f"[{'='*50}]\n")
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def normalize_bday_date(val):
@@ -558,6 +598,7 @@ scheduler = BackgroundScheduler(timezone=MSK)
 scheduler.add_job(check_and_send, 'interval', seconds=30, max_instances=1)
 scheduler.start()
 print(f"[STARTED] Scheduler started. Port: 80, Timezone: {MSK}")
+print(f"[CONFIG] TOKEN set: {TOKEN is not None}, CHAT_ID set: {CHAT_ID is not None}, ADMIN_PASSWORD set: {ADMIN_PASSWORD is not None}")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=80, debug=False)
