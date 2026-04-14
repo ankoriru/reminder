@@ -85,7 +85,7 @@ def check_and_send():
                 # Пробуем распарсить дату из базы для сравнения
                 event_dt = datetime.strptime(e['dt'], "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
                 if event_dt <= now:
-                    success = loop.run_until_complete(send_to_tg(f"💡 {e['reminder_text']}"))
+                    success = loop.run_until_complete(send_to_tg(f"{e['reminder_text']}"))
                     if success:
                         conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (e['id'],))
             except Exception as ex:
