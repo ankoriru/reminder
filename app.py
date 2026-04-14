@@ -12,6 +12,7 @@ from aiogram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- КОНФИГУРАЦИЯ ---
+# Все переменные из окружения
 TOKEN = os.getenv('TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
@@ -41,10 +42,11 @@ def send_msg_threadsafe(text):
     if bot and CHAT_ID:
         try:
             asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
+            print(f"[SENT] {text[:50]}...")
         except Exception as e:
-            print(f"Ошибка отправки сообщения: {e}")
+            print(f"[ERROR] Ошибка отправки сообщения: {e}")
     else:
-        print(f"[BOT NOT CONFIGURED] Message: {text}")
+        print(f"[NOT CONFIGURED] Message: {text}")
 
 # --- БАЗА ДАННЫХ И МИГРАЦИИ ---
 def get_db_connection():
@@ -85,20 +87,24 @@ def init_db():
 def check_and_send():
     """Проверка и отправка уведомлений"""
     now = datetime.now(MSK)
-    now_dm = now.strftime("%d.%m")  # Текущий день и месяц для ДР
+    now_dm = now.strftime("%d.%m")  # Текущий день и месяц для ДР (ДД.ММ)
     current_weekday = now.weekday()  # 0=Пн, 6=Вс
+    now_time_hm = now.strftime("%H:%M")  # Текущее время ЧЧ:ММ
+    
+    print(f"[CHECK] {now.strftime('%d.%m.%Y %H:%M:%S')} MSK - checking notifications...")
     
     conn = get_db_connection()
     try:
-        # 1. ДНИ РОЖДЕНИЯ (09:00:00 - 09:00:20)
-        if now.hour == 9 and now.minute == 0 and 0 <= now.second <= 20:
+        # 1. ДНИ РОЖДЕНИЯ (09:00 МСК)
+        # Проверяем каждую минуту в 09:00, чтобы не пропустить
+        if now.hour == 9 and now.minute == 0:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
             for person in celebrants:
-                bday_str = str(person['bday']).strip()
+                bday_str = str(person['bday']).strip() if person['bday'] else ""
                 # Проверяем совпадение ДД.ММ
-                if bday_str.startswith(now_dm):
+                if bday_str and bday_str.startswith(now_dm):
                     birthday_people.append(person)
             
             if birthday_people:
@@ -109,44 +115,54 @@ def check_and_send():
                 msg_lines.append("Поздравляем 😊🎊")
                 msg = "\n".join(msg_lines)
                 send_msg_threadsafe(msg)
+                print(f"[BIRTHDAY] Sent to {len(birthday_people)} people")
         
         # 2. ЗНАЧИМЫЕ СОБЫТИЯ (ЗС) - Точное время
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
         for event in events:
             try:
-                event_dt = datetime.strptime(event['dt'], "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
+                event_dt_str = event['dt']
+                if not event_dt_str:
+                    continue
+                    
+                # Парсим дату события
+                event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
+                
+                # Сравниваем с текущим временем
                 if event_dt <= now:
                     msg = f"💡 {event['reminder_text']}"
                     send_msg_threadsafe(msg)
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
                     conn.commit()
+                    print(f"[EVENT] Sent event id={event['id']}: {event['event_name']}")
             except Exception as ex:
-                print(f"Ошибка обработки события {event['id']}: {ex}")
+                print(f"[ERROR] Ошибка обработки события {event['id']}: {ex}")
         
         # 3. CUSTOM ЗАДАЧИ
-        now_custom_dt = now.strftime("d.%m.%Y %H:%M")  # Для разовых задач
-        now_time_hm = now.strftime("%H:%M")  # Текущее время ЧЧ:ММ
-        now_date = now.strftime("%d.%m.%Y")  # Текущая дата
-        
         custom_tasks = conn.execute("SELECT * FROM custom_tasks").fetchall()
         for task in custom_tasks:
             try:
-                task_dt_str = str(task['dt']).strip()
-                task_time = task_dt_str.split(' ')[1] if ' ' in task_dt_str else ""
+                task_dt_str = str(task['dt']).strip() if task['dt'] else ""
+                if not task_dt_str:
+                    continue
+                    
                 period = task['period']
                 weekdays_str = task['weekdays'] or ""
                 last_sent = task['last_sent']
                 
-                should_send = False
+                # Парсим время из dt (формат: ДД.ММ.ГГГГ ЧЧ:ММ)
+                task_time = task_dt_str.split(' ')[1] if ' ' in task_dt_str else ""
                 
                 # Проверяем, не отправляли ли уже в эту минуту
                 current_minute = now.strftime("%d.%m.%Y %H:%M")
                 if last_sent == current_minute:
                     continue
                 
+                should_send = False
+                
                 if period == 'once':
                     # Разовая задача - проверяем точное совпадение даты и времени
-                    if task_dt_str == now_custom_dt:
+                    if task_dt_str == current_minute:
                         should_send = True
                 
                 elif period == 'daily':
@@ -167,7 +183,6 @@ def check_and_send():
                 
                 elif period == 'weekly':
                     # Каждую неделю - проверяем день недели и время
-                    # День недели берём из начальной даты задачи
                     task_start = datetime.strptime(task_dt_str, "%d.%m.%Y %H:%M")
                     if task_start.weekday() == current_weekday and task_time == now_time_hm:
                         should_send = True
@@ -190,14 +205,16 @@ def check_and_send():
                     send_msg_threadsafe(task['text'])
                     conn.execute("UPDATE custom_tasks SET last_sent = ? WHERE id = ?", (current_minute, task['id']))
                     conn.commit()
+                    print(f"[CUSTOM] Sent task id={task['id']}: {task['text'][:30]}...")
                     
                     # Для разовых задач удаляем после отправки
                     if period == 'once':
                         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
                         conn.commit()
+                        print(f"[CUSTOM] Deleted one-time task id={task['id']}")
             
             except Exception as ex:
-                print(f"Ошибка обработки custom задачи {task['id']}: {ex}")
+                print(f"[ERROR] Ошибка обработки custom задачи {task['id']}: {ex}")
     
     finally:
         conn.close()
@@ -230,7 +247,7 @@ def normalize_bday_date(val):
         return str(val).strip()
 
 def normalize_event_datetime(val):
-    """Нормализация даты и времени события к формату ДД.ММ.ГГ ЧЧ:ММ:СС"""
+    """Нормализация даты и времени события к формату ДД.ММ.ГГГГ ЧЧ:ММ:СС"""
     if pd.isna(val):
         return ""
     try:
@@ -349,6 +366,7 @@ def upload_dr():
             conn.execute("DELETE FROM birthdays")
             
             # Загружаем новые данные
+            count = 0
             for _, row in df.iterrows():
                 full_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
                 pos = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
@@ -360,9 +378,10 @@ def upload_dr():
                         "INSERT INTO birthdays (full_name, pos, dep, bday) VALUES (?,?,?,?)",
                         (full_name, pos, dep, bday)
                     )
+                    count += 1
             
             conn.commit()
-            flash(f"✅ Список дней рождения обновлен! Загружено записей: {len(df)}")
+            flash(f"✅ Список дней рождения обновлен! Загружено записей: {count}")
         finally:
             conn.close()
     
@@ -395,6 +414,7 @@ def upload_zs():
             conn.execute("DELETE FROM events")
             
             # Загружаем новые данные
+            count = 0
             for _, row in df.iterrows():
                 event_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
                 reminder_text = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
@@ -405,9 +425,10 @@ def upload_zs():
                         "INSERT INTO events (event_name, reminder_text, dt, is_sent) VALUES (?,?,?,0)",
                         (event_name, reminder_text, dt)
                     )
+                    count += 1
             
             conn.commit()
-            flash(f"✅ Список значимых событий обновлен! Загружено записей: {len(df)}")
+            flash(f"✅ Список значимых событий обновлен! Загружено записей: {count}")
         finally:
             conn.close()
     
@@ -536,6 +557,7 @@ init_db()
 scheduler = BackgroundScheduler(timezone=MSK)
 scheduler.add_job(check_and_send, 'interval', seconds=30, max_instances=1)
 scheduler.start()
+print(f"[STARTED] Scheduler started. Port: 80, Timezone: {MSK}")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=80, debug=False)
