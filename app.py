@@ -59,7 +59,7 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT, last_sent TEXT)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
-            (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, UNIQUE(type, ref_id, sent_date))''')
+            (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, sent_at TEXT, UNIQUE(type, ref_id, sent_date))''')
         
         # Migrations
         cursor = conn.execute("PRAGMA table_info(events)")
@@ -76,20 +76,31 @@ def init_db():
         
         conn.commit()
 
-def is_already_sent_today(conn, notif_type, ref_id, today_str):
-    """Проверка, было ли уже отправлено уведомление сегодня"""
+def is_already_sent_recently(conn, notif_type, ref_id, minutes=15):
+    """Проверка, было ли уже отправлено уведомление за последние N минут"""
     cursor = conn.execute(
-        "SELECT 1 FROM sent_log WHERE type = ? AND ref_id = ? AND sent_date = ?",
-        (notif_type, ref_id, today_str)
+        "SELECT sent_at FROM sent_log WHERE type = ? AND ref_id = ? ORDER BY id DESC LIMIT 1",
+        (notif_type, ref_id)
     )
-    return cursor.fetchone() is not None
+    row = cursor.fetchone()
+    if not row or not row['sent_at']:
+        return False
+    
+    try:
+        last_sent = datetime.strptime(row['sent_at'], "%Y-%m-%d %H:%M:%S")
+        now = datetime.now()
+        diff = now - last_sent
+        return diff.total_seconds() < (minutes * 60)
+    except:
+        return False
 
 def mark_as_sent(conn, notif_type, ref_id, today_str):
     """Отметить уведомление как отправленное"""
     try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
-            "INSERT OR IGNORE INTO sent_log (type, ref_id, sent_date) VALUES (?, ?, ?)",
-            (notif_type, ref_id, today_str)
+            "INSERT INTO sent_log (type, ref_id, sent_date, sent_at) VALUES (?, ?, ?, ?)",
+            (notif_type, ref_id, today_str, now_str)
         )
         conn.commit()
     except:
@@ -107,14 +118,15 @@ def check_and_send():
     conn = get_db_connection()
     try:
         # 1. BIRTHDAYS (09:00 MSK)
-        if now.hour == 21 and now.minute <= 8:
+        if now.hour == 21 and now.minute <= 15:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
                 if bday_str and bday_str.startswith(now_dm):
-                    if not is_already_sent_today(conn, 'birthday', person['id'], today_str):
+                    # Проверяем, не отправляли ли за последние 15 минут
+                    if not is_already_sent_recently(conn, 'birthday', person['id'], minutes=15):
                         birthday_people.append(person)
             
             if birthday_people:
