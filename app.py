@@ -21,7 +21,7 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 bot = Bot(token=TOKEN)
 
-# --- БАЗА ДАННЫХ ---
+# --- БАЗА ДАННЫХ И МИГРАЦИИ ---
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -36,7 +36,7 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS custom_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT)''')
         
-        # Проверка миграций (на случай если таблицы уже созданы)
+        # Миграция: Проверка полей
         cursor = conn.execute("PRAGMA table_info(events)")
         cols = [row[1] for row in cursor.fetchall()]
         if 'is_sent' not in cols:
@@ -49,70 +49,65 @@ def init_db():
         conn.commit()
 
 # --- ЛОГИКА ОПОВЕЩЕНИЙ ---
-def run_async(coro):
-    """Безопасный запуск асинхронности в синхронном планировщике"""
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    if loop.is_running():
-        return loop.create_task(coro)
-    else:
-        return loop.run_until_complete(coro)
-
 async def send_to_tg(text):
     try:
         await bot.send_message(CHAT_ID, text)
         return True
     except Exception as e:
-        print(f"Ошибка TG: {e}")
+        print(f"Ошибка TG API: {e}")
         return False
 
 def check_and_send():
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")
     
-    with get_db_connection() as conn:
-        # 1. Дни Рождения (09:00:00 - 09:00:20)
-        if now.hour == 9 and now.minute == 0 and 0 <= now.second <= 20:
-            users = conn.execute("SELECT * FROM birthdays").fetchall()
-            celebrants = [u for u in users if str(u['bday']).strip().startswith(now_dm)]
+    # Открываем соединение внутри потока планировщика
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    try:
+        # 1. Дни Рождения (09:00 МСК)
+        if now.hour == 9 and now.minute == 0 and 0 <= now.second <= 15:
+            celebrants = [u for u in conn.execute("SELECT * FROM birthdays").fetchall() 
+                          if str(u['bday']).strip().startswith(now_dm)]
             if celebrants:
                 msg = "🎉🫶🏼 Сегодня день рождения коллег:\n" + \
                       "\n".join([f"• {u['full_name']}, {u['pos']} ({u['dep']})" for u in celebrants]) + \
                       "\n\nПоздравляем! 😊🎊"
-                run_async(send_to_tg(msg))
+                asyncio.run(send_to_tg(msg))
 
-        # 2. Значимые события (ЗС) - Досылка и точное время
+        # 2. Значимые события (ЗС) - Посекундная точность и досылка пропущенных
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
         for e in events:
             try:
                 event_dt = datetime.strptime(e['dt'], "%d.%m.%Y %H:%M:%S").replace(tzinfo=MSK)
                 if event_dt <= now:
-                    success = run_async(send_to_tg(f"💡 {e['reminder_text']}"))
+                    success = asyncio.run(send_to_tg(f"💡 {e['reminder_text']}"))
                     if success:
                         conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (e['id'],))
                         conn.commit()
-            except Exception as ex: print(f"Ошибка ЗС ID {e['id']}: {ex}")
+            except Exception as ex:
+                print(f"Ошибка даты ЗС {e['id']}: {ex}")
 
         # 3. Custom (Раз в минуту)
         if now.second < 15:
             now_custom_dt = now.strftime("%d.%m.%Y %H:%M")
             now_time_hm = now.strftime("%H:%M")
             current_weekday = str(now.weekday())
+            
             tasks = conn.execute("SELECT * FROM custom_tasks").fetchall()
             for t in tasks:
                 t_dt_str = str(t['dt']).strip()
                 t_time = t_dt_str.split(' ')[1] if ' ' in t_dt_str else ""
                 
                 if t['period'] == 'once' and t_dt_str == now_custom_dt:
-                    run_async(send_to_tg(t['text']))
+                    asyncio.run(send_to_tg(t['text']))
                 elif t['period'] == 'weekdays' and t_time == now_time_hm:
                     allowed = t['weekdays'].split(',') if t['weekdays'] else []
                     if current_weekday in allowed:
-                        run_async(send_to_tg(t['text']))
+                        asyncio.run(send_to_tg(t['text']))
+    finally:
+        conn.close()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def normalize_date(val, include_seconds=True):
@@ -132,14 +127,10 @@ def normalize_date(val, include_seconds=True):
     except: return str(val).strip()
 
 # --- WEB ROUTES ---
-@app.route('/')
-def index():
-    if not session.get('logged_in'): return redirect(url_for('login'))
-    with get_db_connection() as conn:
-        b = conn.execute("SELECT * FROM birthdays").fetchall()
-        e = conn.execute("SELECT * FROM events ORDER BY is_sent ASC, dt DESC").fetchall()
-        c = conn.execute("SELECT * FROM custom_tasks").fetchall()
-    return render_template('index.html', bdays=b, evs=e, customs=c)
+@app.before_request
+def auth_middleware():
+    if request.endpoint not in ['login', 'static'] and not session.get('logged_in'):
+        return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -148,38 +139,38 @@ def login():
         return redirect(url_for('index'))
     return '<html><body style="text-align:center;padding-top:100px;font-family:sans-serif;"><h2>Вход</h2><form method="post"><input type="password" name="password" style="padding:10px;"><button style="padding:10px 20px;">Войти</button></form></body></html>'
 
+@app.route('/')
+def index():
+    with get_db_connection() as conn:
+        b = conn.execute("SELECT * FROM birthdays").fetchall()
+        e = conn.execute("SELECT * FROM events ORDER BY is_sent ASC, dt DESC").fetchall()
+        c = conn.execute("SELECT * FROM custom_tasks").fetchall()
+    return render_template('index.html', bdays=b, evs=e, customs=c)
+
 @app.route('/upload_dr', methods=['POST'])
 def upload_dr():
     file = request.files.get('file')
     if file:
-        try:
-            df = pd.read_excel(file, engine='openpyxl').dropna(how='all')
-            with get_db_connection() as conn:
-                conn.execute("DELETE FROM birthdays")
-                for _, r in df.iterrows():
-                    clean_bday = normalize_date(r.iloc[3], False)
-                    conn.execute("INSERT INTO birthdays (full_name, pos, dep, bday) VALUES (?,?,?,?)", 
-                                 (str(r.iloc[0]).strip(), str(r.iloc[1]).strip(), str(r.iloc[2]).strip(), clean_bday))
-                conn.commit()
-            flash("База ДР обновлена")
-        except Exception as ex: flash(f"Ошибка ДР: {ex}")
+        df = pd.read_excel(file, engine='openpyxl').dropna(how='all')
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM birthdays")
+            for _, r in df.iterrows():
+                conn.execute("INSERT INTO birthdays (full_name, pos, dep, bday) VALUES (?,?,?,?)", 
+                             (str(r.iloc[0]).strip(), str(r.iloc[1]).strip(), str(r.iloc[2]).strip(), normalize_date(r.iloc[3], False)))
+            conn.commit()
     return redirect(url_for('index'))
 
 @app.route('/upload_zs', methods=['POST'])
 def upload_zs():
     file = request.files.get('file')
     if file:
-        try:
-            df = pd.read_excel(file, engine='openpyxl').dropna(how='all')
-            with get_db_connection() as conn:
-                conn.execute("DELETE FROM events")
-                for _, r in df.iterrows():
-                    clean_dt = normalize_date(r.iloc[2], True)
-                    conn.execute("INSERT INTO events (event_name, reminder_text, dt, is_sent) VALUES (?,?,?,0)", 
-                                 (str(r.iloc[0]).strip(), str(r.iloc[1]).strip(), clean_dt))
-                conn.commit()
-            flash("База ЗС обновлена")
-        except Exception as ex: flash(f"Ошибка ЗС: {ex}")
+        df = pd.read_excel(file, engine='openpyxl').dropna(how='all')
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM events")
+            for _, r in df.iterrows():
+                conn.execute("INSERT INTO events (event_name, reminder_text, dt, is_sent) VALUES (?,?,?,0)", 
+                             (str(r.iloc[0]).strip(), str(r.iloc[1]).strip(), normalize_date(r.iloc[2], True)))
+            conn.commit()
     return redirect(url_for('index'))
 
 @app.route('/add_custom', methods=['POST'])
@@ -193,7 +184,6 @@ def add_custom():
             conn.execute("INSERT INTO custom_tasks (text, dt, period, weekdays) VALUES (?,?,?,?)", 
                          (text, dt_final, 'weekdays' if period != 'once' else 'once', ",".join(days)))
             conn.commit()
-        flash("Добавлено")
     except Exception as e: flash(f"Ошибка: {e}")
     return redirect(url_for('index'))
 
@@ -207,17 +197,11 @@ def delete_custom(id):
 @app.route('/download_template/<t_type>')
 def download_template(t_type):
     output = io.BytesIO()
-    if t_type == 'dr':
-        df = pd.DataFrame(columns=['ФИО', 'Должность', 'Отдел', 'Дата рождения (ДД.ММ.ГГГГ)'])
-        df.loc[0] = ['Иванов Иван', 'Менеджер', 'ИТ', '14.04.1990']
-    else:
-        df = pd.DataFrame(columns=['Название', 'Текст сообщения', 'Когда (ДД.ММ.ГГГГ ЧЧ:ММ:СС)'])
-        df.loc[0] = ['Встреча', '🚩 Пора на встречу', '14.04.2026 15:30:00']
-    with pd.ExcelWriter(output, engine='openpyxl') as writer: df.to_excel(writer, index=False)
+    cols = ['ФИО', 'Должность', 'Подразделение', 'Дата (ДД.ММ.ГГГГ)'] if t_type=='dr' else ['Событие', 'Текст сообщения', 'Когда (ДД.ММ.ГГГГ ЧЧ:ММ:СС)']
+    pd.DataFrame(columns=cols).to_excel(output, index=False)
     output.seek(0)
     return send_file(output, as_attachment=True, download_name=f"template_{t_type}.xlsx")
 
-# --- СТАРТ ---
 init_db()
 scheduler = BackgroundScheduler(timezone=MSK)
 scheduler.add_job(check_and_send, 'interval', seconds=10, max_instances=1)
