@@ -209,7 +209,7 @@
             <h3>🎂 Список Дней Рождения</h3>
             
             <div class="info-box">
-                <p>🤖 Бот автоматически отправляет поздравления в <b>09:00 (МСК)</b></p>
+                <p>🤖 Бот автоматически отправляет поздравления в <b>10:20 (МСК)</b></p>
                 <p>📋 Формат файла: <b>Фамилия Имя | Должность | Подразделение | ДД.ММ</b></p>
                 <p>📁 Поддерживаемые форматы: <b>XLSX, CSV</b></p>
             </div>
@@ -400,7 +400,6 @@
             document.getElementById(id).classList.add('active-tab');
             document.getElementById('btn-' + id).classList.add('active');
             
-            // Сохраняем активную вкладку
             localStorage.setItem('activeTab', id);
         }
 
@@ -410,7 +409,6 @@
             picker.style.display = (val === 'weekdays') ? 'block' : 'none';
         }
         
-        // Восстанавливаем активную вкладку при загрузке
         document.addEventListener('DOMContentLoaded', function() {
             const savedTab = localStorage.getItem('activeTab');
             if (savedTab) {
