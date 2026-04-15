@@ -18,20 +18,73 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
-#-----
-@app.route('/test-telegram')
-def test_tg():
-    chat_id = "-3186554853"
-    text = "🧪 Тест из Amvera: " + datetime.now().strftime("%H:%M:%S")
+#----- тестирование 
+
+def send_to_chat(chat_id, text, message_thread_id=None):
+    """Отправка в любой чат с обработкой ошибок и поддержкой форумов"""
+    if not bot:
+        print(f"[ERROR] Bot not initialized")
+        return False, "Bot not initialized"
     
-    result = send_telegram_message(TOKEN, chat_id, text)
-    
-    if result and result.get('ok'):
-        return f"✅ Отправлено! Message ID: {result['result']['message_id']}"
-    else:
-        error = result.get('description', 'Unknown error') if result else 'No response'
-        return f"❌ Ошибка: {error}", 400
-#---
+    try:
+        # Конвертируем chat_id в int (важно для супергрупп)
+        if isinstance(chat_id, str):
+            chat_id = int(chat_id)
+        
+        # Для форумов (групп с темами) нужен message_thread_id
+        kwargs = {'chat_id': chat_id, 'text': text}
+        if message_thread_id:
+            kwargs['message_thread_id'] = int(message_thread_id)
+        
+        future = asyncio.run_coroutine_threadsafe(bot.send_message(**kwargs), bot_loop)
+        result = future.result(timeout=10)  # Ждем результат 10 секунд
+        
+        print(f"[OK] Отправлено в {chat_id}, msg_id: {result.message_id}")
+        return True, f"Message ID: {result.message_id}"
+        
+    except Exception as e:
+        error_str = str(e)
+        # Детальная диагностика
+        if "Forbidden" in error_str or "bot is not a member" in error_str:
+            print(f"[ERROR] Бот не админ/заблокирован в {chat_id}: {error_str}")
+            return False, f"403 Forbidden: Бот не администратор в группе или заблокирован"
+        elif "chat not found" in error_str:
+            print(f"[ERROR] Чат не найден {chat_id}")
+            return False, "Chat not found"
+        elif "message thread not found" in error_str:
+            print(f"[ERROR] Неверный thread_id для форума {chat_id}")
+            return False, "Неверный ID топика (thread_id)"
+        else:
+            print(f"[ERROR] Отправка не удалась: {error_str}")
+            return False, error_str
+
+def send_msg_threadsafe(text):
+    """Обратная совместимость — отправка в основной чат из env"""
+    if CHAT_ID:
+        success, info = send_to_chat(CHAT_ID, text)
+        return success
+    return False
+
+@app.route('/test-chat/<chat_id>')
+def test_chat(chat_id):
+    """Тест отправки в конкретный чат, например: /test-chat/-3186554853"""
+    try:
+        # Для форумов добавьте ?thread_id=1
+        thread_id = request.args.get('thread_id')
+        
+        test_msg = f"🧪 Тест из Amvera\nЧат: {chat_id}\nВремя: {datetime.now(MSK).strftime('%H:%M:%S')}\nТред: {thread_id or 'General'}"
+        
+        success, info = send_to_chat(chat_id, test_msg, thread_id)
+        
+        if success:
+            return f"✅ Успешно отправлено!<br>Чат: {chat_id}<br>Ответ TG: {info}"
+        else:
+            return f"❌ Ошибка отправки:<br>{info}<br><br>Проверьте, что бот админ в группе!", 400
+            
+    except Exception as e:
+        return f"❌ Исключение: {str(e)}", 500
+
+#--- тест окончен
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
