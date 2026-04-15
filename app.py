@@ -18,7 +18,7 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
------
+#-----
 @app.route('/test-telegram')
 def test_tg():
     chat_id = "-3186554853"
@@ -31,7 +31,7 @@ def test_tg():
     else:
         error = result.get('description', 'Unknown error') if result else 'No response'
         return f"❌ Ошибка: {error}", 400
----
+#---
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
