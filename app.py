@@ -18,36 +18,6 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
-#----- тестирование 
-def send_to_chat(chat_id, text, message_thread_id=None):
-    """Отправка в любой чат с проверкой ошибок"""
-    if not bot:
-        return False, "Bot not initialized"
-    
-    try:
-        if isinstance(chat_id, str):
-            chat_id = int(chat_id)
-        
-        kwargs = {'chat_id': chat_id, 'text': text}
-        if message_thread_id:
-            kwargs['message_thread_id'] = int(message_thread_id)
-        
-        future = asyncio.run_coroutine_threadsafe(bot.send_message(**kwargs), bot_loop)
-        result = future.result(timeout=10)
-        return True, str(result.message_id)
-        
-    except Exception as e:
-        error = str(e)
-        print(f"[ERROR] {error}")
-        return False, error
-
-def send_msg_threadsafe(text):
-    """Отправка в основной чат из env"""
-    if CHAT_ID:
-        success, _ = send_to_chat(CHAT_ID, text)
-        return success
-    return False
-#--- тест окончен
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
