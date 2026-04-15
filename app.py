@@ -30,6 +30,17 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
+-----
+test_chat = "-3186554853"
+result = send_telegram_message(TOKEN, test_chat, "🔍 Тест доступа")
+
+if result and result.get('ok'):
+    print("✅ Бот имеет доступ к группе")
+else:
+    print("⚠️ Проверьте, что бот добавлен администратором в группу")
+    print("   - Перейдите в группу → Управление группой → Администраторы")
+    print("   - Добавьте бота с правами 'Отправка сообщений'")
+---
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
