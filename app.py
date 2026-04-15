@@ -11,18 +11,6 @@ from flask import Flask, render_template, request, redirect, session, flash, url
 from aiogram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 
-
-
-test_chat = "-3186554853"
-result = send_telegram_message(BOT_TOKEN, test_chat, "🔍 Тест доступа")
-
-if result and result.get('ok'):
-    print("✅ Бот имеет доступ к группе")
-else:
-    print("⚠️ Проверьте, что бот добавлен администратором в группу")
-    print("   - Перейдите в группу → Управление группой → Администраторы")
-    print("   - Добавьте бота с правами 'Отправка сообщений'")
-    
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv('TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
