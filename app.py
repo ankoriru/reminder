@@ -106,9 +106,8 @@ def check_and_send():
     today_str = now.strftime("%Y-%m-%d")
     conn = get_db_connection()
     try:
-        # 1. BIRTHDAYS (09:00 MSK) - отправляем один раз в день
-        # Проверяем с 09:00 до 09:59, если ещё не отправляли
-        if now.hour == 9:
+        # 1. BIRTHDAYS (10:20 MSK) - отправляем один раз в день
+        if now.hour == 10 and now.minute == 20:
             # Проверяем, не отправляли ли уже сегодня
             if not is_birthday_sent_today(conn, today_str):
                 celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
