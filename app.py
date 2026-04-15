@@ -40,7 +40,7 @@ def send_msg_threadsafe(text):
     """Безопасная отправка сообщения"""
     if bot and CHAT_ID:
         try:
-            asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
+            asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text, parse_mode='HTML'), bot_loop)
         except Exception as e:
             print(f"[ERROR] Send failed: {e}")
 
@@ -120,7 +120,7 @@ def check_and_send():
             if birthday_people:
                 msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
                 for person in birthday_people:
-                    msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
+                    msg_lines.append(f"• <b>{person['full_name']}, {person['pos']}, {person['dep']}</b>")
                     mark_as_sent(conn, 'birthday', person['id'], today_str)
                 msg_lines.append("Поздравляем 😊🎊")
                 send_msg_threadsafe("\n".join(msg_lines))
