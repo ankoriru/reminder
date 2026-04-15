@@ -19,15 +19,18 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
 -----
-test_chat = "-3186554853"
-result = send_telegram_message(TOKEN, test_chat, "🔍 Тест доступа")
-
-if result and result.get('ok'):
-    print("✅ Бот имеет доступ к группе")
-else:
-    print("⚠️ Проверьте, что бот добавлен администратором в группу")
-    print("   - Перейдите в группу → Управление группой → Администраторы")
-    print("   - Добавьте бота с правами 'Отправка сообщений'")
+@app.route('/test-telegram')
+def test_tg():
+    chat_id = "-3186554853"
+    text = "🧪 Тест из Amvera: " + datetime.now().strftime("%H:%M:%S")
+    
+    result = send_telegram_message(TOKEN, chat_id, text)
+    
+    if result and result.get('ok'):
+        return f"✅ Отправлено! Message ID: {result['result']['message_id']}"
+    else:
+        error = result.get('description', 'Unknown error') if result else 'No response'
+        return f"❌ Ошибка: {error}", 400
 ---
 
 app = Flask(__name__)
