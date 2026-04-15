@@ -26,6 +26,14 @@ app.secret_key = os.urandom(24)
 bot = None
 if TOKEN:
     bot = Bot(token=TOKEN)
+    print(f"[INIT] Bot initialized with token")
+else:
+    print(f"[INIT] WARNING: TOKEN not set!")
+
+if CHAT_ID:
+    print(f"[INIT] CHAT_ID: {CHAT_ID}")
+else:
+    print(f"[INIT] WARNING: CHAT_ID not set!")
 
 # --- EVENT LOOP ---
 bot_loop = asyncio.new_event_loop()
@@ -38,11 +46,21 @@ threading.Thread(target=start_bot_loop, args=(bot_loop,), daemon=True).start()
 
 def send_msg_threadsafe(text):
     """Безопасная отправка сообщения"""
+    print(f"[SEND] Attempting to send: {text[:50]}...")
+    print(f"[SEND] bot={bot is not None}, CHAT_ID={CHAT_ID}")
+    
     if bot and CHAT_ID:
         try:
-            asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
+            future = asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text), bot_loop)
+            result = future.result(timeout=10)
+            print(f"[SEND] Success! Message ID: {result.message_id}")
+            return True
         except Exception as e:
-            print(f"[ERROR] Send failed: {e}")
+            print(f"[SEND ERROR] {e}")
+            return False
+    else:
+        print(f"[SEND ERROR] Bot not configured!")
+        return False
 
 # --- DATABASE ---
 def get_db_connection():
@@ -92,62 +110,98 @@ def mark_birthday_sent(conn, today_str):
             (today_str,)
         )
         conn.commit()
-    except:
-        pass
+    except Exception as e:
+        print(f"[DB ERROR] mark_birthday_sent: {e}")
 
 # --- SCHEDULER ---
 def check_and_send():
     """Проверка и отправка уведомлений"""
+    # Получаем текущее время в MSK
     now = datetime.now(MSK)
     now_dm = now.strftime("%d.%m")
     current_weekday = now.weekday()
     now_time_hm = now.strftime("%H:%M")
-    
     today_str = now.strftime("%Y-%m-%d")
+    
+    print(f"\n[CHECK] {now.strftime('%d.%m.%Y %H:%M:%S')} MSK | hour={now.hour} min={now.minute}")
+    
     conn = get_db_connection()
     try:
-        # 1. BIRTHDAYS (10:20 MSK) - отправляем один раз в день
-        if now.hour == 10 and now.minute == 50:
-            # Проверяем, не отправляли ли уже сегодня
+        # 1. BIRTHDAYS (10:20-10:25 MSK) - отправляем один раз в день
+        if now.hour == 11 and 20 <= now.minute <= 25:
+            print("[BDAY] In birthday window (10:20-10:25)")
+            
             if not is_birthday_sent_today(conn, today_str):
+                print("[BDAY] Not sent yet today, checking...")
                 celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
-                birthday_people = []
+                print(f"[BDAY] Found {len(celebrants)} people in DB")
                 
+                birthday_people = []
                 for person in celebrants:
                     bday_str = str(person['bday']).strip() if person['bday'] else ""
-                    if bday_str and bday_str.startswith(now_dm):
+                    # Берем первые 5 символов (ДД.ММ) для сравнения
+                    bday_dm = bday_str[:5] if len(bday_str) >= 5 else bday_str
+                    print(f"[BDAY] Check: {person['full_name']} bday='{bday_str}' bday_dm='{bday_dm}' now_dm='{now_dm}'")
+                    
+                    if bday_dm == now_dm:
                         birthday_people.append(person)
+                        print(f"[BDAY] MATCH: {person['full_name']}")
+                
+                print(f"[BDAY] Total matches: {len(birthday_people)}")
                 
                 if birthday_people:
                     msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
                     for person in birthday_people:
                         msg_lines.append(f"• {person['full_name']}, {person['pos']}, {person['dep']}")
                     msg_lines.append("Поздравляем 😊🎊")
-                    send_msg_threadsafe("\n".join(msg_lines))
-                
-                # Отмечаем как отправленное (даже если никого нет, чтобы не проверять каждую минуту)
-                mark_birthday_sent(conn, today_str)
+                    message = "\n".join(msg_lines)
+                    print(f"[BDAY] Sending message:\n{message}")
+                    
+                    success = send_msg_threadsafe(message)
+                    if success:
+                        mark_birthday_sent(conn, today_str)
+                        print("[BDAY] Sent successfully")
+                    else:
+                        print("[BDAY] Failed to send, will retry")
+                else:
+                    print("[BDAY] No birthdays today")
+                    mark_birthday_sent(conn, today_str)  # Отмечаем чтобы не проверять каждую минуту
+            else:
+                print("[BDAY] Already sent today")
         
         # 2. EVENTS
         events = conn.execute("SELECT * FROM events WHERE is_sent = 0").fetchall()
+        if events:
+            print(f"[EVENTS] Found {len(events)} unsent events")
+        
         for event in events:
             try:
                 event_dt_str = event['dt']
                 if not event_dt_str:
                     continue
                 
+                # Парсим дату события
                 event_dt = datetime.strptime(event_dt_str, "%d.%m.%Y %H:%M:%S")
-                now_naive = now.replace(tzinfo=None)
+                # Создаем наивное время для сравнения из aware времени
+                now_naive = datetime(now.year, now.month, now.day, now.hour, now.minute, now.second)
+                
+                print(f"[EVENT] id={event['id']}: {event_dt} <= {now_naive} ? {event_dt <= now_naive}")
                 
                 if event_dt <= now_naive:
-                    send_msg_threadsafe(event['reminder_text'])
-                    conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
-                    conn.commit()
-            except:
-                pass
+                    print(f"[EVENT] id={event['id']}: Sending...")
+                    success = send_msg_threadsafe(event['reminder_text'])
+                    if success:
+                        conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
+                        conn.commit()
+                        print(f"[EVENT] id={event['id']}: Sent and marked")
+            except Exception as e:
+                print(f"[EVENT ERROR] id={event.get('id', '?')}: {e}")
         
         # 3. CUSTOM TASKS
         custom_tasks = conn.execute("SELECT * FROM custom_tasks").fetchall()
+        if custom_tasks:
+            print(f"[CUSTOM] Found {len(custom_tasks)} tasks")
+        
         for task in custom_tasks:
             try:
                 task_dt_str = str(task['dt']).strip() if task['dt'] else ""
@@ -187,15 +241,16 @@ def check_and_send():
                     should_send = task_dm == now_dm_check and task_time == now_time_hm
                 
                 if should_send:
-                    send_msg_threadsafe(task['text'])
-                    conn.execute("UPDATE custom_tasks SET last_sent = ? WHERE id = ?", (current_minute, task['id']))
-                    conn.commit()
-                    
-                    if period == 'once':
-                        conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
+                    print(f"[CUSTOM] id={task['id']}: Sending...")
+                    success = send_msg_threadsafe(task['text'])
+                    if success:
+                        conn.execute("UPDATE custom_tasks SET last_sent = ? WHERE id = ?", (current_minute, task['id']))
                         conn.commit()
-            except:
-                pass
+                        if period == 'once':
+                            conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
+                            conn.commit()
+            except Exception as e:
+                print(f"[CUSTOM ERROR] id={task.get('id', '?')}: {e}")
     finally:
         conn.close()
 
@@ -486,6 +541,7 @@ init_db()
 scheduler = BackgroundScheduler(timezone=MSK)
 scheduler.add_job(check_and_send, 'interval', seconds=30, max_instances=1)
 scheduler.start()
+print("[INIT] Scheduler started, checking every 30 seconds")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=80, debug=False)
