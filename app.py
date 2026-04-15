@@ -19,7 +19,6 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
 #----- тестирование 
-
 def send_to_chat(chat_id, text, message_thread_id=None):
     """Отправка в любой чат с обработкой ошибок и поддержкой форумов"""
     if not bot:
