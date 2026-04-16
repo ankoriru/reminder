@@ -22,6 +22,33 @@ MSK = pytz.timezone('Europe/Moscow')
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
+# Фильтр Jinja2 для отображения только ДД.ММ
+def extract_dm(val):
+    """Извлекает ДД.ММ из любого формата даты"""
+    if not val:
+        return ""
+    try:
+        val_str = str(val).strip()
+        # Если уже в формате ДД.ММ
+        if len(val_str) == 5 and val_str[2] == '.':
+            return val_str
+        # Если в формате ДД.ММ.ГГГГ или ДД.ММ.ГГ
+        if '.' in val_str:
+            parts = val_str.split('.')
+            if len(parts) >= 2:
+                return f"{parts[0]}.{parts[1]}"
+        # Если в формате ГГГГ-ММ-ДД или ГГГГ-ММ-ДД ЧЧ:ММ:СС
+        if '-' in val_str:
+            parts = val_str.split('-')
+            if len(parts) >= 3:
+                day = parts[2].split()[0]  # Убираем время если есть
+                return f"{day}.{parts[1]}"
+        return val_str[:5] if len(val_str) >= 5 else val_str
+    except:
+        return str(val)[:5] if val else ""
+
+app.jinja_env.filters['dm'] = extract_dm
+
 # Инициализация бота
 bot = None
 if TOKEN:
@@ -113,7 +140,7 @@ def check_and_send():
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
-                if bday_str and bday_str.startswith(now_dm):
+                if extract_dm(bday_str) == now_dm:
                     if not is_already_sent_today(conn, 'birthday', person['id'], today_str):
                         birthday_people.append(person)
             
@@ -421,6 +448,71 @@ def delete_custom(id):
     try:
         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (id,))
         conn.commit()
+        flash("Задача удалена!")
+    finally:
+        conn.close()
+    
+    return redirect(url_for('index'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if password == ADMIN_PASSWORD:
+            session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            return '''<html><body style="text-align:center;padding-top:100px;">
+                <h2>Вход</h2>
+                <p style="color:red;">Неверный пароль!</p>
+                <form method="post"><input type="password" name="password"><button>Вход</button></form>
+            </body></html>'''
+    
+    return '''<html><body style="text-align:center;padding-top:100px;">
+        <h2>🔐 Вход</h2>
+        <form method="post">
+            <input type="password" name="password" placeholder="Введите пароль" style="padding:10px;"><br><br>
+            <button style="padding:10px 20px;">Вход</button>
+        </form>
+    </body></html>'''
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
+
+@app.route('/download_template/<t_type>')
+def download_template(t_type):
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    output = io.BytesIO()
+    
+    if t_type == 'dr':
+        df = pd.DataFrame(columns=['Фамилия Имя', 'Должность', 'Подразделение', 'День Месяц Рождения'])
+        example = pd.DataFrame([['Иванов Иван', 'Менеджер', 'Отдел продаж', '15.03']], 
+                               columns=['Фамилия Имя', 'Должность', 'Подразделение', 'День Месяц Рождения'])
+        df = pd.concat([df, example], ignore_index=True)
+    else:
+        df = pd.DataFrame(columns=['Событие', 'Напоминание', 'Дата и время'])
+        example = pd.DataFrame([['Встреча с клиентом', 'Совещание в переговорной', '25.12.2024 14:30']], 
+                               columns=['Событие', 'Напоминание', 'Дата и время'])
+        df = pd.concat([df, example], ignore_index=True)
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Лист1')
+    
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=f"{t_type}_template.xlsx")
+
+# --- INIT ---
+init_db()
+scheduler = BackgroundScheduler(timezone=MSK)
+scheduler.add_job(check_and_send, 'interval', seconds=30, max_instances=1)
+scheduler.start()
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=80, debug=False)ommit()
         flash("Задача удалена!")
     finally:
         conn.close()
