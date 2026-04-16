@@ -178,6 +178,7 @@
             font-weight: 500;
         }
     </style>
+
 <base target="_blank">
 </head>
 <body>
@@ -241,7 +242,7 @@
                             <td><b>{{ b.full_name }}</b></td>
                             <td>{{ b.pos }}</td>
                             <td>{{ b.dep }}</td>
-                            <td>{{ b.bday }}</td>
+                            <td>{{ b.bday|dm }}</td>
                         </tr>
                         {% else %}
                         <tr>
