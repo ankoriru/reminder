@@ -120,7 +120,7 @@ def check_and_send():
             if birthday_people:
                 msg_lines = ["🎉🫶🏼 Сегодня день рождения наших коллег:"]
                 for person in birthday_people:
-                    msg_lines.append(f"• <b>{person['full_name']}, {person['pos']}, {person['dep']}</b>")
+                    msg_lines.append(f"• <b>{person['full_name']}</b>, {person['pos']}, {person['dep']}")
                     mark_as_sent(conn, 'birthday', person['id'], today_str)
                 msg_lines.append("Поздравляем 😊🎊")
                 send_msg_threadsafe("\n".join(msg_lines))
