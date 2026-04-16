@@ -119,7 +119,7 @@ def mark_as_sent(conn, notif_type, ref_id, today_str):
             (notif_type, ref_id, today_str)
         )
         conn.commit()
-    except Exception:
+    except:
         pass
 
 # --- SCHEDULER ---
@@ -167,7 +167,7 @@ def check_and_send():
                     send_msg_threadsafe(event['reminder_text'])
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
                     conn.commit()
-            except Exception:
+            except:
                 pass
         
         # 3. CUSTOM TASKS
@@ -218,7 +218,7 @@ def check_and_send():
                     if period == 'once':
                         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
                         conn.commit()
-            except Exception:
+            except:
                 pass
     finally:
         conn.close()
@@ -236,10 +236,10 @@ def normalize_bday_date(val):
             try:
                 dt_obj = datetime.strptime(val_str, fmt)
                 return dt_obj.strftime("%d.%m")
-            except Exception:
+            except:
                 continue
         return val_str
-    except Exception:
+    except:
         return str(val).strip()
 
 def normalize_event_datetime(val):
@@ -261,10 +261,10 @@ def normalize_event_datetime(val):
             try:
                 dt_obj = datetime.strptime(val_str, fmt)
                 return dt_obj.strftime("%d.%m.%Y %H:%M:%S")
-            except Exception:
+            except:
                 continue
         return val_str
-    except Exception:
+    except:
         return str(val).strip()
 
 def read_data_file(file):
@@ -276,7 +276,7 @@ def read_data_file(file):
                     file.seek(0)
                     df = pd.read_csv(file, encoding=encoding)
                     break
-                except Exception:
+                except:
                     continue
             else:
                 raise ValueError("Cannot read CSV")
@@ -448,71 +448,6 @@ def delete_custom(id):
     try:
         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (id,))
         conn.commit()
-        flash("Задача удалена!")
-    finally:
-        conn.close()
-    
-    return redirect(url_for('index'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-        if password == ADMIN_PASSWORD:
-            session['logged_in'] = True
-            return redirect(url_for('index'))
-        else:
-            return '''<html><body style="text-align:center;padding-top:100px;">
-                <h2>Вход</h2>
-                <p style="color:red;">Неверный пароль!</p>
-                <form method="post"><input type="password" name="password"><button>Вход</button></form>
-            </body></html>'''
-    
-    return '''<html><body style="text-align:center;padding-top:100px;">
-        <h2>🔐 Вход</h2>
-        <form method="post">
-            <input type="password" name="password" placeholder="Введите пароль" style="padding:10px;"><br><br>
-            <button style="padding:10px 20px;">Вход</button>
-        </form>
-    </body></html>'''
-
-@app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    return redirect(url_for('login'))
-
-@app.route('/download_template/<t_type>')
-def download_template(t_type):
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
-    
-    output = io.BytesIO()
-    
-    if t_type == 'dr':
-        df = pd.DataFrame(columns=['Фамилия Имя', 'Должность', 'Подразделение', 'День Месяц Рождения'])
-        example = pd.DataFrame([['Иванов Иван', 'Менеджер', 'Отдел продаж', '15.03']], 
-                               columns=['Фамилия Имя', 'Должность', 'Подразделение', 'День Месяц Рождения'])
-        df = pd.concat([df, example], ignore_index=True)
-    else:
-        df = pd.DataFrame(columns=['Событие', 'Напоминание', 'Дата и время'])
-        example = pd.DataFrame([['Встреча с клиентом', 'Совещание в переговорной', '25.12.2024 14:30']], 
-                               columns=['Событие', 'Напоминание', 'Дата и время'])
-        df = pd.concat([df, example], ignore_index=True)
-    
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Лист1')
-    
-    output.seek(0)
-    return send_file(output, as_attachment=True, download_name=f"{t_type}_template.xlsx")
-
-# --- INIT ---
-init_db()
-scheduler = BackgroundScheduler(timezone=MSK)
-scheduler.add_job(check_and_send, 'interval', seconds=30, max_instances=1)
-scheduler.start()
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=80, debug=False)ommit()
         flash("Задача удалена!")
     finally:
         conn.close()
