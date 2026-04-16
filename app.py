@@ -44,7 +44,7 @@ def extract_dm(val):
                 day = parts[2].split()[0]  # Убираем время если есть
                 return f"{day}.{parts[1]}"
         return val_str[:5] if len(val_str) >= 5 else val_str
-    except:
+    except Exception:
         return str(val)[:5] if val else ""
 
 app.jinja_env.filters['dm'] = extract_dm
@@ -119,7 +119,7 @@ def mark_as_sent(conn, notif_type, ref_id, today_str):
             (notif_type, ref_id, today_str)
         )
         conn.commit()
-    except:
+    except Exception:
         pass
 
 # --- SCHEDULER ---
@@ -167,7 +167,7 @@ def check_and_send():
                     send_msg_threadsafe(event['reminder_text'])
                     conn.execute("UPDATE events SET is_sent = 1 WHERE id = ?", (event['id'],))
                     conn.commit()
-            except:
+            except Exception:
                 pass
         
         # 3. CUSTOM TASKS
@@ -218,7 +218,7 @@ def check_and_send():
                     if period == 'once':
                         conn.execute("DELETE FROM custom_tasks WHERE id = ?", (task['id'],))
                         conn.commit()
-            except:
+            except Exception:
                 pass
     finally:
         conn.close()
@@ -236,10 +236,10 @@ def normalize_bday_date(val):
             try:
                 dt_obj = datetime.strptime(val_str, fmt)
                 return dt_obj.strftime("%d.%m")
-            except:
+            except Exception:
                 continue
         return val_str
-    except:
+    except Exception:
         return str(val).strip()
 
 def normalize_event_datetime(val):
@@ -261,10 +261,10 @@ def normalize_event_datetime(val):
             try:
                 dt_obj = datetime.strptime(val_str, fmt)
                 return dt_obj.strftime("%d.%m.%Y %H:%M:%S")
-            except:
+            except Exception:
                 continue
         return val_str
-    except:
+    except Exception:
         return str(val).strip()
 
 def read_data_file(file):
@@ -276,7 +276,7 @@ def read_data_file(file):
                     file.seek(0)
                     df = pd.read_csv(file, encoding=encoding)
                     break
-                except:
+                except Exception:
                     continue
             else:
                 raise ValueError("Cannot read CSV")
