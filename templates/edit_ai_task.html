@@ -178,14 +178,12 @@
 
                 {% set selected_days = (task.weekdays or '').split(',') %}
 
-                <!-- Дата -->
                 <div id="dateField" class="{% if task.period not in ['once', 'weekly', 'yearly'] %}hidden{% endif %}">
                     <label><b>Дата:</b></label>
                     <input type="date" name="schedule_date" value="{{ task.schedule_date or '' }}" id="scheduleDate">
                     <div class="period-hint">Для разовой задачи — обязательно</div>
                 </div>
 
-                <!-- Дни недели -->
                 <div id="weekdaysField" class="{% if task.period != 'weekdays' %}hidden{% endif %}">
                     <label><b>Дни недели:</b></label>
                     <div class="checkbox-group">
@@ -199,7 +197,6 @@
                     </div>
                 </div>
 
-                <!-- Число месяца -->
                 <div id="monthDayField" class="{% if task.period != 'monthly' %}hidden{% endif %}">
                     <label><b>Число месяца:</b></label>
                     <input type="number" name="month_day" min="1" max="31" value="{{ task.month_day or '' }}">
@@ -219,13 +216,11 @@
             const monthDayField = document.getElementById('monthDayField');
             const dateInput = document.getElementById('scheduleDate');
 
-            // Скрываем все
             dateField.classList.add('hidden');
             weekdaysField.classList.add('hidden');
             monthDayField.classList.add('hidden');
             dateInput.required = false;
 
-            // Показываем нужное
             if (period === 'once') {
                 dateField.classList.remove('hidden');
                 dateInput.required = true;
@@ -238,7 +233,6 @@
             }
         }
 
-        // Инициализация
         togglePeriodOptions();
     </script>
 
