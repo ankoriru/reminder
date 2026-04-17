@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Редактирование ИИ-задачи - Notification Control Center</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --bg: #f0f2f5;
+            --white: #ffffff;
+            --text-main: #1c1e21;
+            --text-muted: #606770;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            max-width: 800px; 
+            margin: auto; 
+            padding: 20px; 
+            background-color: var(--bg); 
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        h2 { text-align: center; margin-bottom: 35px; font-weight: 700; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .back-btn, .logout-btn {
+            background: var(--primary);
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .logout-btn { background: var(--danger); }
+
+        .content { background: var(--white); padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+
+        .flash { 
+            padding: 15px 25px; 
+            background: #d4edda; 
+            color: #155724; 
+            border-radius: 12px; 
+            margin-bottom: 25px; 
+            border: 1px solid #c3e6cb; 
+            text-align: center; 
+            font-weight: 600; 
+        }
+        .flash.error { background: #f8d7da; color: #721c24; }
+
+        .form-box { background: #f8f9fa; padding: 30px; border-radius: 15px; border: 1px solid #eaebed; }
+
+        textarea, input, select { 
+            width: 100%; 
+            padding: 12px 15px; 
+            margin: 10px 0 20px 0; 
+            border: 1px solid #ddd; 
+            border-radius: 10px; 
+            box-sizing: border-box; 
+            font-size: 14px;
+        }
+        textarea { min-height: 100px; resize: vertical; }
+
+        button[type="submit"] { 
+            background: var(--warning); 
+            color: black; 
+            border: none; 
+            padding: 15px; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            width: 100%; 
+            font-size: 16px; 
+            margin-top: 10px;
+        }
+
+        .btn-cancel {
+            display: block;
+            text-align: center;
+            padding: 12px;
+            background: var(--text-muted);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin: 15px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .checkbox-group input { width: auto; margin: 0; }
+
+        .hidden { display: none; }
+
+        .period-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: -15px;
+            margin-bottom: 15px;
+        }
+
+        .current-info {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="/ai_tasks" class="back-btn">← Назад к списку</a>
+        <h2 style="margin:0;">✏️ Редактирование ИИ-задачи #{{ task.id }}</h2>
+        <a href="/logout" class="logout-btn">🚪 Выход</a>
+    </div>
+
+    <div class="content">
+        <div class="current-info">
+            <b>Текущее название:</b> {{ task.name }}<br>
+            <b>Статус:</b> {% if task.is_active %}✅ Активна{% else %}❌ Отключена{% endif %}<br>
+            {% if task.last_sent %}
+            <b>Последняя отправка:</b> {{ task.last_sent }}
+            {% endif %}
+        </div>
+
+        <div class="form-box">
+            <form method="POST" id="editForm">
+                <label><b>Название задачи:</b></label>
+                <input type="text" name="name" value="{{ task.name }}" required>
+
+                <label><b>Промпт для ИИ:</b></label>
+                <textarea name="prompt_template" required>{{ task.prompt_template }}</textarea>
+
+                <label><b>Контекст:</b></label>
+                <textarea name="context">{{ task.context or '' }}</textarea>
+
+                <label><b>Время отправки (ЧЧ:ММ):</b></label>
+                <input type="time" name="schedule_time" value="{{ task.schedule_time }}" required>
+
+                <label><b>Периодичность:</b></label>
+                <select name="period" id="periodSelect" onchange="togglePeriodOptions()">
+                    <option value="once" {% if task.period == 'once' %}selected{% endif %}>📅 Один раз</option>
+                    <option value="daily" {% if task.period == 'daily' %}selected{% endif %}>📆 Каждый день</option>
+                    <option value="workdays" {% if task.period == 'workdays' %}selected{% endif %}>💼 Рабочие дни</option>
+                    <option value="weekdays" {% if task.period == 'weekdays' %}selected{% endif %}>📌 По дням недели</option>
+                    <option value="weekly" {% if task.period == 'weekly' %}selected{% endif %}>🗓️ Еженедельно</option>
+                    <option value="monthly" {% if task.period == 'monthly' %}selected{% endif %}>📅 Раз в месяц</option>
+                    <option value="yearly" {% if task.period == 'yearly' %}selected{% endif %}>🎉 Раз в год</option>
+                </select>
+
+                {% set selected_days = (task.weekdays or '').split(',') %}
+
+                <!-- Дата -->
+                <div id="dateField" class="{% if task.period not in ['once', 'weekly', 'yearly'] %}hidden{% endif %}">
+                    <label><b>Дата:</b></label>
+                    <input type="date" name="schedule_date" value="{{ task.schedule_date or '' }}" id="scheduleDate">
+                    <div class="period-hint">Для разовой задачи — обязательно</div>
+                </div>
+
+                <!-- Дни недели -->
+                <div id="weekdaysField" class="{% if task.period != 'weekdays' %}hidden{% endif %}">
+                    <label><b>Дни недели:</b></label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="weekdays" value="0" {% if '0' in selected_days %}checked{% endif %}> Пн</label>
+                        <label><input type="checkbox" name="weekdays" value="1" {% if '1' in selected_days %}checked{% endif %}> Вт</label>
+                        <label><input type="checkbox" name="weekdays" value="2" {% if '2' in selected_days %}checked{% endif %}> Ср</label>
+                        <label><input type="checkbox" name="weekdays" value="3" {% if '3' in selected_days %}checked{% endif %}> Чт</label>
+                        <label><input type="checkbox" name="weekdays" value="4" {% if '4' in selected_days %}checked{% endif %}> Пт</label>
+                        <label><input type="checkbox" name="weekdays" value="5" {% if '5' in selected_days %}checked{% endif %}> Сб</label>
+                        <label><input type="checkbox" name="weekdays" value="6" {% if '6' in selected_days %}checked{% endif %}> Вс</label>
+                    </div>
+                </div>
+
+                <!-- Число месяца -->
+                <div id="monthDayField" class="{% if task.period != 'monthly' %}hidden{% endif %}">
+                    <label><b>Число месяца:</b></label>
+                    <input type="number" name="month_day" min="1" max="31" value="{{ task.month_day or '' }}">
+                </div>
+
+                <button type="submit">💾 Сохранить изменения</button>
+                <a href="/ai_tasks" class="btn-cancel">Отмена</a>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function togglePeriodOptions() {
+            const period = document.getElementById('periodSelect').value;
+            const dateField = document.getElementById('dateField');
+            const weekdaysField = document.getElementById('weekdaysField');
+            const monthDayField = document.getElementById('monthDayField');
+            const dateInput = document.getElementById('scheduleDate');
+
+            // Скрываем все
+            dateField.classList.add('hidden');
+            weekdaysField.classList.add('hidden');
+            monthDayField.classList.add('hidden');
+            dateInput.required = false;
+
+            // Показываем нужное
+            if (period === 'once') {
+                dateField.classList.remove('hidden');
+                dateInput.required = true;
+            } else if (period === 'weekdays') {
+                weekdaysField.classList.remove('hidden');
+            } else if (period === 'monthly') {
+                monthDayField.classList.remove('hidden');
+            } else if (period === 'weekly' || period === 'yearly') {
+                dateField.classList.remove('hidden');
+            }
+        }
+
+        // Инициализация
+        togglePeriodOptions();
+    </script>
+
+</body>
+</html>
