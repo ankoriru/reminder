@@ -25,20 +25,24 @@ TOKEN = os.getenv('TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
-# ИИ конфигурация
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')  # или gpt-3.5-turbo для экономии
+# ИИ конфигурация (VseGPT - доступен из РФ)
+VSEGPT_API_KEY = os.getenv('VSEGPT_API_KEY')
+VSEGPT_MODEL = os.getenv('VSEGPT_MODEL', 'gpt-4o-mini')  # gpt-4o-mini, gpt-4o, claude-3-5-sonnet и др.
+VSEGPT_BASE_URL = "https://api.vsegpt.ru/v1"
 
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
 
-# Инициализация OpenAI клиента
-openai_client = None
-if OPENAI_AVAILABLE and OPENAI_API_KEY:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    print(f"[INIT] OpenAI initialized with model: {OPENAI_MODEL}")
-elif not OPENAI_API_KEY:
-    print("[INIT] OPENAI_API_KEY not set. AI features disabled.")
+# Инициализация VseGPT клиента (OpenAI-совместимый API)
+ai_client = None
+if OPENAI_AVAILABLE and VSEGPT_API_KEY:
+    ai_client = OpenAI(
+        api_key=VSEGPT_API_KEY,
+        base_url=VSEGPT_BASE_URL
+    )
+    print(f"[INIT] VseGPT initialized with model: {VSEGPT_MODEL}")
+elif not VSEGPT_API_KEY:
+    print("[INIT] VSEGPT_API_KEY not set. AI features disabled.")
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -67,9 +71,9 @@ def send_msg_threadsafe(text):
 
 # --- ИИ ФУНКЦИИ ---
 def generate_ai_message(prompt_template, context=None):
-    """Генерация сообщения через OpenAI"""
-    if not openai_client:
-        print("[AI ERROR] OpenAI not configured")
+    """Генерация сообщения через VseGPT (доступен из РФ)"""
+    if not ai_client:
+        print("[AI ERROR] VseGPT not configured. Set VSEGPT_API_KEY.")
         return None
 
     try:
@@ -86,8 +90,8 @@ def generate_ai_message(prompt_template, context=None):
         if context:
             messages.insert(1, {"role": "user", "content": f"Контекст: {context}"})
 
-        response = openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
+        response = ai_client.chat.completions.create(
+            model=VSEGPT_MODEL,
             messages=messages,
             max_tokens=500,
             temperature=0.7
@@ -616,7 +620,7 @@ def ai_tasks():
     finally:
         conn.close()
 
-    ai_enabled = openai_client is not None
+    ai_enabled = ai_client is not None
     return render_template('ai_tasks.html', tasks=tasks, ai_enabled=ai_enabled)
 
 @app.route('/add_ai_task', methods=['POST'])
@@ -625,8 +629,8 @@ def add_ai_task():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
 
-    if not openai_client:
-        flash("ИИ не настроен! Добавьте OPENAI_API_KEY")
+    if not ai_client:
+        flash("ИИ не настроен! Добавьте VSEGPT_API_KEY")
         return redirect(url_for('ai_tasks'))
 
     try:
@@ -698,8 +702,8 @@ def test_ai_task(id):
     if not session.get('logged_in'):
         return redirect(url_for('login'))
 
-    if not openai_client:
-        flash("ИИ не настроен!")
+    if not ai_client:
+        flash("ИИ не настроен! Добавьте VSEGPT_API_KEY")
         return redirect(url_for('ai_tasks'))
 
     conn = get_db_connection()
