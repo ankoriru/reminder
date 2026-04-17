@@ -47,6 +47,33 @@ elif not VSEGPT_API_KEY:
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
+# Фильтр Jinja2 для отображения только ДД.ММ
+def extract_dm(val):
+    """Извлекает ДД.ММ из любого формата даты"""
+    if not val:
+        return ""
+    try:
+        val_str = str(val).strip()
+        # Если уже в формате ДД.ММ
+        if len(val_str) == 5 and val_str[2] == '.':
+            return val_str
+        # Если в формате ДД.ММ.ГГГГ или ДД.ММ.ГГ
+        if '.' in val_str:
+            parts = val_str.split('.')
+            if len(parts) >= 2:
+                return f"{parts[0]}.{parts[1]}"
+        # Если в формате ГГГГ-ММ-ДД или ГГГГ-ММ-ДД ЧЧ:ММ:СС
+        if '-' in val_str:
+            parts = val_str.split('-')
+            if len(parts) >= 3:
+                day = parts[2].split()[0]  # Убираем время если есть
+                return f"{day}.{parts[1]}"
+        return val_str[:5] if len(val_str) >= 5 else val_str
+    except Exception:
+        return str(val)[:5] if val else ""
+
+app.jinja_env.filters['dm'] = extract_dm
+
 # Инициализация бота
 bot = None
 if TOKEN:
@@ -241,7 +268,8 @@ def check_and_send():
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
-                if bday_str and bday_str.startswith(now_dm):
+                bday_dm = extract_dm(bday_str)
+                if bday_dm == now_dm:
                     if not is_already_sent_today(conn, 'birthday', person['id'], today_str):
                         birthday_people.append(person)
             
