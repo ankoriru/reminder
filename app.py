@@ -712,9 +712,8 @@ def test_ai_task(id):
         if task:
             message = generate_ai_message(task['prompt_template'], task['context'])
             if message:
-                send_msg_threadsafe(f"🧪 Тест ИИ-задачи '{task['name']}':
-
-{message}")
+                test_msg = f"🧪 Тест ИИ-задачи '{task['name']}':\n\n{message}"
+                send_msg_threadsafe(test_msg)
                 flash("Тестовое сообщение отправлено!")
             else:
                 flash("Ошибка генерации сообщения")
