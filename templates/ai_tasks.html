@@ -116,11 +116,14 @@
             font-size: 12px;
             font-weight: 600;
             margin-right: 5px;
+            display: inline-block;
+            margin-bottom: 5px;
         }
         .btn-toggle-on { background: var(--success); color: white; }
         .btn-toggle-off { background: var(--warning); color: black; }
         .btn-test { background: var(--primary); color: white; }
         .btn-delete { background: var(--danger); color: white; }
+        .btn-edit { background: #6c757d; color: white; }
 
         .info-box {
             background: #e7f3ff;
@@ -139,8 +142,35 @@
             text-align: center;
             margin-bottom: 20px;
         }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin: 15px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .checkbox-group input { width: auto; margin: 0; }
+
+        .hidden { display: none; }
+
+        .period-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: -15px;
+            margin-bottom: 15px;
+        }
     </style>
-<base target="_blank">
 </head>
 <body>
 
@@ -184,7 +214,7 @@
         </div>
 
         <div class="form-box">
-            <form action="/add_ai_task" method="post">
+            <form action="/add_ai_task" method="post" id="aiTaskForm">
                 <label><b>Название задачи:</b></label>
                 <input type="text" name="name" placeholder="Например: Утренняя мотивация" required>
 
@@ -195,24 +225,46 @@
                 <textarea name="context" placeholder="Дополнительная информация, которую ИИ может использовать (например: текущие проекты, важные даты)"></textarea>
 
                 <label><b>Время отправки (ЧЧ:ММ):</b></label>
-                <input type="time" name="schedule_time" required>
-
-                <label><b>Модель ИИ:</b></label>
-                <select name="model_hint">
-                    <option value="gpt-4o-mini">gpt-4o-mini (быстрая, дешевая)</option>
-                    <option value="gpt-4o">gpt-4o (умная, дороже)</option>
-                    <option value="claude-3-5-sonnet">claude-3-5-sonnet (лучшая для русского)</option>
-                    <option value="deepseek-chat">deepseek-chat (дешевая альтернатива)</option>
-                </select>
-                <small style="color: var(--text-muted);">Укажите в переменной VSEGPT_MODEL</small>
-                <br><br>
+                <input type="time" name="schedule_time" required value="09:00">
 
                 <label><b>Периодичность:</b></label>
-                <select name="period">
-                    <option value="daily">Каждый день</option>
-                    <option value="workdays">Рабочие дни (Пн-Пт)</option>
-                    <option value="weekly">Каждую неделю (понедельник)</option>
+                <select name="period" id="periodSelect" onchange="togglePeriodOptions()">
+                    <option value="once">📅 Один раз (точная дата)</option>
+                    <option value="daily" selected>📆 Каждый день</option>
+                    <option value="workdays">💼 Рабочие дни (Пн-Пт)</option>
+                    <option value="weekdays">📌 По выбранным дням недели</option>
+                    <option value="weekly">🗓️ Еженедельно</option>
+                    <option value="monthly">📅 Раз в месяц</option>
+                    <option value="yearly">🎉 Раз в год</option>
                 </select>
+
+                <!-- Дата для разовой задачи -->
+                <div id="dateField" class="hidden">
+                    <label><b>Дата выполнения:</b></label>
+                    <input type="date" name="schedule_date" id="scheduleDate">
+                    <div class="period-hint">Для разовой задачи — обязательно. Для других — опционально (для определения дня недели/месяца)</div>
+                </div>
+
+                <!-- Дни недели -->
+                <div id="weekdaysField" class="hidden">
+                    <label><b>Выберите дни недели:</b></label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="weekdays" value="0"> Понедельник</label>
+                        <label><input type="checkbox" name="weekdays" value="1"> Вторник</label>
+                        <label><input type="checkbox" name="weekdays" value="2"> Среда</label>
+                        <label><input type="checkbox" name="weekdays" value="3"> Четверг</label>
+                        <label><input type="checkbox" name="weekdays" value="4"> Пятница</label>
+                        <label><input type="checkbox" name="weekdays" value="5"> Суббота</label>
+                        <label><input type="checkbox" name="weekdays" value="6"> Воскресенье</label>
+                    </div>
+                </div>
+
+                <!-- Число месяца -->
+                <div id="monthDayField" class="hidden">
+                    <label><b>Число месяца (1-31):</b></label>
+                    <input type="number" name="month_day" min="1" max="31" placeholder="15">
+                    <div class="period-hint">В какой день месяца отправлять сообщение</div>
+                </div>
 
                 <button type="submit">💾 Создать ИИ-задачу</button>
             </form>
@@ -237,16 +289,17 @@
                         <td><b>{{ t.name }}</b></td>
                         <td>{{ t.prompt_template[:50] }}...</td>
                         <td>{{ t.schedule_time }}</td>
-                        <td>{{ t.period }}</td>
+                        <td>{{ get_period_display(t.period, t.weekdays, t.month_day) }}</td>
                         <td class="{% if t.is_active %}status-active{% else %}status-inactive{% endif %}">
                             {% if t.is_active %}Активна{% else %}Выключена{% endif %}
                         </td>
                         <td>
+                            <a href="/test_ai_task/{{ t.id }}" class="btn-action btn-test">🧪 Тест</a>
+                            <a href="/edit_ai_task/{{ t.id }}" class="btn-action btn-edit">✏️ Редакт.</a>
                             <a href="/toggle_ai_task/{{ t.id }}" class="btn-action {% if t.is_active %}btn-toggle-off{% else %}btn-toggle-on{% endif %}">
-                                {% if t.is_active %}Выключить{% else %}Включить{% endif %}
+                                {% if t.is_active %}Выкл.{% else %}Вкл.{% endif %}
                             </a>
-                            <a href="/test_ai_task/{{ t.id }}" class="btn-action btn-test">Тест</a>
-                            <a href="/delete_ai_task/{{ t.id }}" class="btn-action btn-delete" onclick="return confirm('Удалить задачу?')">Удалить</a>
+                            <a href="/delete_ai_task/{{ t.id }}" class="btn-action btn-delete" onclick="return confirm('Удалить задачу?')">🗑️</a>
                         </td>
                     </tr>
                     {% else %}
@@ -258,6 +311,37 @@
             </table>
         </div>
     </div>
+
+    <script>
+        function togglePeriodOptions() {
+            const period = document.getElementById('periodSelect').value;
+            const dateField = document.getElementById('dateField');
+            const weekdaysField = document.getElementById('weekdaysField');
+            const monthDayField = document.getElementById('monthDayField');
+            const dateInput = document.getElementById('scheduleDate');
+
+            // Скрываем все
+            dateField.classList.add('hidden');
+            weekdaysField.classList.add('hidden');
+            monthDayField.classList.add('hidden');
+            dateInput.required = false;
+
+            // Показываем нужное
+            if (period === 'once') {
+                dateField.classList.remove('hidden');
+                dateInput.required = true;
+            } else if (period === 'weekdays') {
+                weekdaysField.classList.remove('hidden');
+            } else if (period === 'monthly') {
+                monthDayField.classList.remove('hidden');
+            } else if (period === 'weekly' || period === 'yearly') {
+                dateField.classList.remove('hidden');
+            }
+        }
+
+        // Инициализация при загрузке
+        togglePeriodOptions();
+    </script>
 
 </body>
 </html>
