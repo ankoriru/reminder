@@ -200,7 +200,7 @@
         <div class="ai-disabled">
             <h3>⚠️ ИИ не настроен</h3>
             <p>Добавьте переменную окружения <code>VSEGPT_API_KEY</code> для включения ИИ-функций.</p>
-            <p><a href="https://vsegpt.ru" target="_blank">Получить ключ на vsegpt.ru</a></p>
+            <p><a href="https://vsegpt.ru">Получить ключ на vsegpt.ru</a></p>
         </div>
         {% endif %}
 
@@ -238,14 +238,12 @@
                     <option value="yearly">🎉 Раз в год</option>
                 </select>
 
-                <!-- Дата для разовой задачи -->
                 <div id="dateField" class="hidden">
                     <label><b>Дата выполнения:</b></label>
                     <input type="date" name="schedule_date" id="scheduleDate">
                     <div class="period-hint">Для разовой задачи — обязательно. Для других — опционально (для определения дня недели/месяца)</div>
                 </div>
 
-                <!-- Дни недели -->
                 <div id="weekdaysField" class="hidden">
                     <label><b>Выберите дни недели:</b></label>
                     <div class="checkbox-group">
@@ -259,7 +257,6 @@
                     </div>
                 </div>
 
-                <!-- Число месяца -->
                 <div id="monthDayField" class="hidden">
                     <label><b>Число месяца (1-31):</b></label>
                     <input type="number" name="month_day" min="1" max="31" placeholder="15">
@@ -320,13 +317,11 @@
             const monthDayField = document.getElementById('monthDayField');
             const dateInput = document.getElementById('scheduleDate');
 
-            // Скрываем все
             dateField.classList.add('hidden');
             weekdaysField.classList.add('hidden');
             monthDayField.classList.add('hidden');
             dateInput.required = false;
 
-            // Показываем нужное
             if (period === 'once') {
                 dateField.classList.remove('hidden');
                 dateInput.required = true;
@@ -339,7 +334,6 @@
             }
         }
 
-        // Инициализация при загрузке
         togglePeriodOptions();
     </script>
 
