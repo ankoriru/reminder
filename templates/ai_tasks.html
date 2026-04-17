@@ -140,6 +140,7 @@
             margin-bottom: 20px;
         }
     </style>
+<base target="_blank">
 </head>
 <body>
 
@@ -168,7 +169,8 @@
         {% if not ai_enabled %}
         <div class="ai-disabled">
             <h3>⚠️ ИИ не настроен</h3>
-            <p>Добавьте переменную окружения <code>OPENAI_API_KEY</code> для включения ИИ-функций.</p>
+            <p>Добавьте переменную окружения <code>VSEGPT_API_KEY</code> для включения ИИ-функций.</p>
+            <p><a href="https://vsegpt.ru" target="_blank">Получить ключ на vsegpt.ru</a></p>
         </div>
         {% endif %}
 
@@ -194,6 +196,16 @@
 
                 <label><b>Время отправки (ЧЧ:ММ):</b></label>
                 <input type="time" name="schedule_time" required>
+
+                <label><b>Модель ИИ:</b></label>
+                <select name="model_hint">
+                    <option value="gpt-4o-mini">gpt-4o-mini (быстрая, дешевая)</option>
+                    <option value="gpt-4o">gpt-4o (умная, дороже)</option>
+                    <option value="claude-3-5-sonnet">claude-3-5-sonnet (лучшая для русского)</option>
+                    <option value="deepseek-chat">deepseek-chat (дешевая альтернатива)</option>
+                </select>
+                <small style="color: var(--text-muted);">Укажите в переменной VSEGPT_MODEL</small>
+                <br><br>
 
                 <label><b>Периодичность:</b></label>
                 <select name="period">
