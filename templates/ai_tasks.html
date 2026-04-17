@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ИИ Задачи - Notification Control Center</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --bg: #f0f2f5;
+            --white: #ffffff;
+            --text-main: #1c1e21;
+            --text-muted: #606770;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            max-width: 1200px; 
+            margin: auto; 
+            padding: 20px; 
+            background-color: var(--bg); 
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        h2 { text-align: center; margin-bottom: 35px; font-weight: 700; color: var(--text-main); }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .back-btn, .logout-btn {
+            background: var(--primary);
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .logout-btn { background: var(--danger); }
+
+        .nav { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
+        .nav a { 
+            padding: 14px 30px; 
+            text-decoration: none;
+            border: none; 
+            background: var(--white); 
+            border-radius: 12px; 
+            font-weight: 600; 
+            transition: all 0.3s ease; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            color: var(--text-muted);
+        }
+        .nav a.active { background: var(--primary); color: white; }
+
+        .content { background: var(--white); padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+
+        .flash { 
+            padding: 15px 25px; 
+            background: #d4edda; 
+            color: #155724; 
+            border-radius: 12px; 
+            margin-bottom: 25px; 
+            border: 1px solid #c3e6cb; 
+            text-align: center; 
+            font-weight: 600; 
+        }
+        .flash.error { background: #f8d7da; color: #721c24; }
+        .flash.warning { background: #fff3cd; color: #856404; }
+
+        .form-box { background: #f8f9fa; padding: 30px; border-radius: 15px; border: 1px solid #eaebed; margin-bottom: 35px; }
+
+        textarea, input, select { 
+            width: 100%; 
+            padding: 12px 15px; 
+            margin: 10px 0 20px 0; 
+            border: 1px solid #ddd; 
+            border-radius: 10px; 
+            box-sizing: border-box; 
+            font-size: 14px;
+        }
+        textarea { min-height: 100px; resize: vertical; }
+
+        button[type="submit"] { 
+            background: var(--success); 
+            color: white; 
+            border: none; 
+            padding: 15px; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            width: 100%; 
+            font-size: 16px; 
+        }
+
+        .table-container { overflow-x: auto; margin-top: 25px; border-radius: 12px; border: 1px solid #eee; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { padding: 16px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; }
+
+        .status-active { color: var(--success); font-weight: bold; }
+        .status-inactive { color: var(--danger); font-weight: bold; }
+
+        .btn-action {
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 5px;
+        }
+        .btn-toggle-on { background: var(--success); color: white; }
+        .btn-toggle-off { background: var(--warning); color: black; }
+        .btn-test { background: var(--primary); color: white; }
+        .btn-delete { background: var(--danger); color: white; }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid var(--primary);
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 0 10px 10px 0;
+        }
+        .info-box p { margin: 5px 0; color: var(--text-muted); font-size: 14px; }
+
+        .ai-disabled {
+            background: #fff3cd;
+            border: 2px solid var(--warning);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="/" class="back-btn">← Назад</a>
+        <h2 style="margin:0;">🤖 ИИ Задачи</h2>
+        <a href="/logout" class="logout-btn">🚪 Выход</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {% if category == 'error' %}error{% endif %}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="nav">
+        <a href="/">🎂 Дни рождения</a>
+        <a href="/">🔔 События</a>
+        <a href="/">✍️ Custom</a>
+        <a href="/ai_tasks" class="active">🤖 ИИ Задачи</a>
+    </div>
+
+    <div class="content">
+        {% if not ai_enabled %}
+        <div class="ai-disabled">
+            <h3>⚠️ ИИ не настроен</h3>
+            <p>Добавьте переменную окружения <code>OPENAI_API_KEY</code> для включения ИИ-функций.</p>
+        </div>
+        {% endif %}
+
+        <h3>➕ Новая ИИ-задача</h3>
+
+        <div class="info-box">
+            <p><b>Как это работает:</b></p>
+            <p>1. Опишите, что должен написать ИИ (например: "Напиши мотивационное сообщение команде на понедельник")</p>
+            <p>2. Укажите время и периодичность отправки</p>
+            <p>3. ИИ будет автоматически генерировать уникальные сообщения по расписанию</p>
+        </div>
+
+        <div class="form-box">
+            <form action="/add_ai_task" method="post">
+                <label><b>Название задачи:</b></label>
+                <input type="text" name="name" placeholder="Например: Утренняя мотивация" required>
+
+                <label><b>Что должен написать ИИ (промпт):</b></label>
+                <textarea name="prompt_template" placeholder="Например: Напиши короткое мотивационное сообщение для команды на начало рабочей недели. Пожелай продуктивной недели и хорошего настроения." required></textarea>
+
+                <label><b>Дополнительный контекст (опционально):</b></label>
+                <textarea name="context" placeholder="Дополнительная информация, которую ИИ может использовать (например: текущие проекты, важные даты)"></textarea>
+
+                <label><b>Время отправки (ЧЧ:ММ):</b></label>
+                <input type="time" name="schedule_time" required>
+
+                <label><b>Периодичность:</b></label>
+                <select name="period">
+                    <option value="daily">Каждый день</option>
+                    <option value="workdays">Рабочие дни (Пн-Пт)</option>
+                    <option value="weekly">Каждую неделю (понедельник)</option>
+                </select>
+
+                <button type="submit">💾 Создать ИИ-задачу</button>
+            </form>
+        </div>
+
+        <h3>📋 Активные ИИ-задачи ({{ tasks|length }})</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>Промпт</th>
+                        <th>Время</th>
+                        <th>Период</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tasks %}
+                    <tr>
+                        <td><b>{{ t.name }}</b></td>
+                        <td>{{ t.prompt_template[:50] }}...</td>
+                        <td>{{ t.schedule_time }}</td>
+                        <td>{{ t.period }}</td>
+                        <td class="{% if t.is_active %}status-active{% else %}status-inactive{% endif %}">
+                            {% if t.is_active %}Активна{% else %}Выключена{% endif %}
+                        </td>
+                        <td>
+                            <a href="/toggle_ai_task/{{ t.id }}" class="btn-action {% if t.is_active %}btn-toggle-off{% else %}btn-toggle-on{% endif %}">
+                                {% if t.is_active %}Выключить{% else %}Включить{% endif %}
+                            </a>
+                            <a href="/test_ai_task/{{ t.id }}" class="btn-action btn-test">Тест</a>
+                            <a href="/delete_ai_task/{{ t.id }}" class="btn-action btn-delete" onclick="return confirm('Удалить задачу?')">Удалить</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; color: var(--text-muted);">Нет ИИ-задач. Создайте первую!</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</body>
+</html>
