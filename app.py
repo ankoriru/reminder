@@ -205,21 +205,35 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, UNIQUE(type, ref_id, sent_date))''')
 
-        # Таблица для ИИ-задач
+        # Таблица для ИИ-задач с расширенной периодичностью
         conn.execute('''CREATE TABLE IF NOT EXISTS ai_tasks 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
              name TEXT, 
              prompt_template TEXT, 
              context TEXT, 
              schedule_time TEXT, 
+             schedule_date TEXT,
              period TEXT, 
+             weekdays TEXT,
+             month_day TEXT,
              is_active INTEGER DEFAULT 1,
              last_sent TEXT)''')
         
-        # Migrations
-        cursor = conn.execute("PRAGMA table_info(events)")
+        # Migrations для расширения существующей таблицы ai_tasks
+        cursor = conn.execute("PRAGMA table_info(ai_tasks)")
         cols = [row[1] for row in cursor.fetchall()]
-        if 'is_sent' not in cols:
+        
+        if 'schedule_date' not in cols:
+            conn.execute("ALTER TABLE ai_tasks ADD COLUMN schedule_date TEXT")
+        if 'weekdays' not in cols:
+            conn.execute("ALTER TABLE ai_tasks ADD COLUMN weekdays TEXT")
+        if 'month_day' not in cols:
+            conn.execute("ALTER TABLE ai_tasks ADD COLUMN month_day TEXT")
+        
+        # Migrations для других таблиц
+        cursor_e = conn.execute("PRAGMA table_info(events)")
+        cols_e = [row[1] for row in cursor_e.fetchall()]
+        if 'is_sent' not in cols_e:
             conn.execute("ALTER TABLE events ADD COLUMN is_sent INTEGER DEFAULT 0")
         
         cursor_c = conn.execute("PRAGMA table_info(custom_tasks)")
@@ -258,6 +272,7 @@ def check_and_send():
     today_str = now.strftime("%Y-%m-%d")
     current_weekday = now.weekday()
     now_time_hm = now.strftime("%H:%M")
+    current_day = now.day
     
     conn = get_db_connection()
     try:
@@ -350,50 +365,89 @@ def check_and_send():
             except:
                 pass
 
-        # 4. AI TASKS (ИИ-задачи) - ИСПРАВЛЕНО
+        # 4. AI TASKS (ИИ-задачи) - РАСШИРЕННАЯ ПЕРИОДИЧНОСТЬ
         ai_tasks_list = conn.execute("SELECT * FROM ai_tasks WHERE is_active = 1").fetchall()
         for task in ai_tasks_list:
             try:
                 task_time = task['schedule_time']  # формат "HH:MM"
+                period = task['period']
+                weekdays_str = task['weekdays'] or ""
+                month_day = task['month_day']
+                schedule_date = task['schedule_date']
+                last_sent = task['last_sent']
                 
                 # Проверяем время
-                if task_time == now_time_hm:
-                    # Проверяем периодичность
-                    should_send = False
-                    period = task['period']
-                    last_sent = task['last_sent']
-                    
-                    # Проверяем, не отправляли ли уже сегодня
-                    if last_sent == today_str:
-                        continue
-                    
-                    if period == 'daily':
+                if task_time != now_time_hm:
+                    continue
+                
+                # Проверяем, не отправляли ли уже сегодня
+                if last_sent == today_str:
+                    continue
+                
+                should_send = False
+                
+                if period == 'once':
+                    # Точечная разовая задача: проверяем дату и время
+                    if schedule_date:
+                        should_send = schedule_date == today_str
+                    else:
+                        should_send = True  # Если дата не указана, отправляем сегодня
+                
+                elif period == 'daily':
+                    should_send = True
+                
+                elif period == 'workdays':
+                    should_send = current_weekday < 5  # Пн-Пт (0-4)
+                
+                elif period == 'weekdays':
+                    # По выбранным дням недели
+                    selected_days = weekdays_str.split(',') if weekdays_str else []
+                    should_send = str(current_weekday) in selected_days
+                
+                elif period == 'weekly':
+                    # Еженедельно в тот же день недели, что и начальная дата
+                    if schedule_date:
+                        start_dt = datetime.strptime(schedule_date, "%Y-%m-%d")
+                        should_send = start_dt.weekday() == current_weekday
+                    else:
                         should_send = True
-                    elif period == 'workdays':
-                        should_send = current_weekday < 5  # Пн-Пт (0-4)
-                    elif period == 'weekly':
+                
+                elif period == 'monthly':
+                    # Раз в месяц: проверяем день месяца
+                    if month_day:
+                        should_send = int(month_day) == current_day
+                    elif schedule_date:
+                        start_dt = datetime.strptime(schedule_date, "%Y-%m-%d")
+                        should_send = start_dt.day == current_day
+                    else:
                         should_send = True
-                    elif period == 'monthly':
+                
+                elif period == 'yearly':
+                    # Раз в год
+                    if schedule_date:
+                        start_dt = datetime.strptime(schedule_date, "%Y-%m-%d")
+                        task_dm = start_dt.strftime("%d.%m")
+                        now_dm_check = now.strftime("%d.%m")
+                        should_send = task_dm == now_dm_check
+                    else:
                         should_send = True
-                    elif period == 'once':
-                        should_send = True
-                    
-                    if should_send:
-                        # Генерируем сообщение через ИИ
-                        message = generate_ai_message(task['prompt_template'], task['context'])
-                        if message:
-                            send_msg_threadsafe(f"🤖 {task['name']}\n\n{message}")
-                            # Обновляем last_sent
-                            conn.execute(
-                                "UPDATE ai_tasks SET last_sent = ? WHERE id = ?",
-                                (today_str, task['id'])
-                            )
+                
+                if should_send:
+                    # Генерируем сообщение через ИИ
+                    message = generate_ai_message(task['prompt_template'], task['context'])
+                    if message:
+                        send_msg_threadsafe(f"🤖 {task['name']}\n\n{message}")
+                        # Обновляем last_sent
+                        conn.execute(
+                            "UPDATE ai_tasks SET last_sent = ? WHERE id = ?",
+                            (today_str, task['id'])
+                        )
+                        conn.commit()
+                        
+                        # Если разовая задача — деактивируем
+                        if period == 'once':
+                            conn.execute("UPDATE ai_tasks SET is_active = 0 WHERE id = ?", (task['id'],))
                             conn.commit()
-                            
-                            # Если разовая задача — деактивируем
-                            if period == 'once':
-                                conn.execute("UPDATE ai_tasks SET is_active = 0 WHERE id = ?", (task['id'],))
-                                conn.commit()
             except Exception as e:
                 print(f"[AI TASK ERROR] Task {task.get('id', 'unknown')}: {e}")
                 continue
@@ -467,7 +521,7 @@ def read_data_file(file):
     except Exception as e:
         raise e
 
-def get_period_display(period, weekdays=None):
+def get_period_display(period, weekdays=None, month_day=None):
     period_names = {
         'once': 'Один раз',
         'daily': 'Каждый день',
@@ -477,7 +531,34 @@ def get_period_display(period, weekdays=None):
         'monthly': 'Каждый месяц',
         'yearly': 'Каждый год'
     }
-    return period_names.get(period, period)
+    
+    base_name = period_names.get(period, period)
+    
+    if period == 'weekdays' and weekdays:
+        day_names = {
+            '0': 'Пн', '1': 'Вт', '2': 'Ср', '3': 'Чт', 
+            '4': 'Пт', '5': 'Сб', '6': 'Вс'
+        }
+        days = [day_names.get(d, d) for d in weekdays.split(',') if d]
+        base_name += f" ({', '.join(days)})"
+    
+    if period == 'monthly' and month_day:
+        base_name += f" ({month_day} число)"
+    
+    return base_name
+
+def get_weekday_name(day_num):
+    """Получить название дня недели по номеру"""
+    names = {
+        '0': 'Понедельник',
+        '1': 'Вторник', 
+        '2': 'Среда',
+        '3': 'Четверг',
+        '4': 'Пятница',
+        '5': 'Суббота',
+        '6': 'Воскресенье'
+    }
+    return names.get(str(day_num), day_num)
 
 # --- ROUTES ---
 @app.route('/test_send/<type>')
@@ -698,7 +779,8 @@ def ai_tasks():
         conn.close()
 
     ai_enabled = ai_client is not None
-    return render_template('ai_tasks.html', tasks=tasks, ai_enabled=ai_enabled)
+    return render_template('ai_tasks.html', tasks=tasks, ai_enabled=ai_enabled, 
+                          get_period_display=get_period_display, get_weekday_name=get_weekday_name)
 
 @app.route('/add_ai_task', methods=['POST'])
 def add_ai_task():
@@ -715,18 +797,28 @@ def add_ai_task():
         prompt_template = request.form.get('prompt_template', '').strip()
         context = request.form.get('context', '').strip()
         schedule_time = request.form.get('schedule_time', '')  # HH:MM
+        schedule_date = request.form.get('schedule_date', '')   # YYYY-MM-DD для разовых
         period = request.form.get('period', 'daily')
+        weekdays = request.form.getlist('weekdays')  # Для period='weekdays'
+        month_day = request.form.get('month_day', '')  # Для period='monthly'
 
         if not name or not prompt_template or not schedule_time:
             flash("Заполните все обязательные поля!")
             return redirect(url_for('ai_tasks'))
 
+        # Для разовых задач дата обязательна
+        if period == 'once' and not schedule_date:
+            flash("Для разовой задачи укажите дату!")
+            return redirect(url_for('ai_tasks'))
+
         conn = get_db_connection()
         try:
             conn.execute(
-                """INSERT INTO ai_tasks (name, prompt_template, context, schedule_time, period, is_active) 
-                   VALUES (?, ?, ?, ?, ?, 1)""",
-                (name, prompt_template, context, schedule_time, period)
+                """INSERT INTO ai_tasks (name, prompt_template, context, schedule_time, schedule_date, 
+                   period, weekdays, month_day, is_active) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                (name, prompt_template, context, schedule_time, schedule_date or None, 
+                 period, ",".join(weekdays) if weekdays else None, month_day or None)
             )
             conn.commit()
             flash(f"✅ ИИ-задача '{name}' добавлена!")
@@ -736,6 +828,64 @@ def add_ai_task():
         flash(f"❌ Ошибка: {str(e)}")
 
     return redirect(url_for('ai_tasks'))
+
+@app.route('/edit_ai_task/<int:id>', methods=['GET', 'POST'])
+def edit_ai_task(id):
+    """Редактирование ИИ-задачи"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    
+    if request.method == 'POST':
+        if not ai_client:
+            flash("ИИ не настроен!")
+            return redirect(url_for('ai_tasks'))
+
+        try:
+            name = request.form.get('name', '').strip()
+            prompt_template = request.form.get('prompt_template', '').strip()
+            context = request.form.get('context', '').strip()
+            schedule_time = request.form.get('schedule_time', '')
+            schedule_date = request.form.get('schedule_date', '')
+            period = request.form.get('period', 'daily')
+            weekdays = request.form.getlist('weekdays')
+            month_day = request.form.get('month_day', '')
+
+            if not name or not prompt_template or not schedule_time:
+                flash("Заполните все обязательные поля!")
+                return redirect(url_for('edit_ai_task', id=id))
+
+            if period == 'once' and not schedule_date:
+                flash("Для разовой задачи укажите дату!")
+                return redirect(url_for('edit_ai_task', id=id))
+
+            conn.execute(
+                """UPDATE ai_tasks SET name=?, prompt_template=?, context=?, schedule_time=?, 
+                   schedule_date=?, period=?, weekdays=?, month_day=?, last_sent=NULL 
+                   WHERE id=?""",
+                (name, prompt_template, context, schedule_time, schedule_date or None,
+                 period, ",".join(weekdays) if weekdays else None, month_day or None, id)
+            )
+            conn.commit()
+            flash(f"✅ ИИ-задача '{name}' обновлена!")
+            return redirect(url_for('ai_tasks'))
+        except Exception as e:
+            flash(f"❌ Ошибка: {str(e)}")
+            return redirect(url_for('ai_tasks'))
+        finally:
+            conn.close()
+    
+    # GET - показываем форму редактирования
+    try:
+        task = conn.execute("SELECT * FROM ai_tasks WHERE id = ?", (id,)).fetchone()
+        if not task:
+            flash("Задача не найдена!")
+            return redirect(url_for('ai_tasks'))
+    finally:
+        conn.close()
+
+    return render_template('edit_ai_task.html', task=task, get_weekday_name=get_weekday_name)
 
 @app.route('/toggle_ai_task/<int:id>')
 def toggle_ai_task(id):
