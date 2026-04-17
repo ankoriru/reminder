@@ -11,43 +11,37 @@ from flask import Flask, render_template, request, redirect, session, flash, url
 from aiogram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 
+# --- ИИ ИНТЕГРАЦИЯ ---
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("[WARNING] OpenAI not installed. AI features disabled.")
+
+
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv('TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
+# ИИ конфигурация
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')  # или gpt-3.5-turbo для экономии
+
 DB_PATH = '/data/bot_database.db'
 MSK = pytz.timezone('Europe/Moscow')
 
+# Инициализация OpenAI клиента
+openai_client = None
+if OPENAI_AVAILABLE and OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    print(f"[INIT] OpenAI initialized with model: {OPENAI_MODEL}")
+elif not OPENAI_API_KEY:
+    print("[INIT] OPENAI_API_KEY not set. AI features disabled.")
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
-
-# Фильтр Jinja2 для отображения только ДД.ММ
-def extract_dm(val):
-    """Извлекает ДД.ММ из любого формата даты"""
-    if not val:
-        return ""
-    try:
-        val_str = str(val).strip()
-        # Если уже в формате ДД.ММ
-        if len(val_str) == 5 and val_str[2] == '.':
-            return val_str
-        # Если в формате ДД.ММ.ГГГГ или ДД.ММ.ГГ
-        if '.' in val_str:
-            parts = val_str.split('.')
-            if len(parts) >= 2:
-                return f"{parts[0]}.{parts[1]}"
-        # Если в формате ГГГГ-ММ-ДД или ГГГГ-ММ-ДД ЧЧ:ММ:СС
-        if '-' in val_str:
-            parts = val_str.split('-')
-            if len(parts) >= 3:
-                day = parts[2].split()[0]  # Убираем время если есть
-                return f"{day}.{parts[1]}"
-        return val_str[:5] if len(val_str) >= 5 else val_str
-    except Exception:
-        return str(val)[:5] if val else ""
-
-app.jinja_env.filters['dm'] = extract_dm
 
 # Инициализация бота
 bot = None
@@ -71,6 +65,98 @@ def send_msg_threadsafe(text):
         except Exception as e:
             print(f"[ERROR] Send failed: {e}")
 
+# --- ИИ ФУНКЦИИ ---
+def generate_ai_message(prompt_template, context=None):
+    """Генерация сообщения через OpenAI"""
+    if not openai_client:
+        print("[AI ERROR] OpenAI not configured")
+        return None
+
+    try:
+        system_prompt = """Ты - корпоративный ассистент для рабочего чата Telegram. 
+Твоя задача - создавать краткие, дружелюбные и информативные сообщения для коллег.
+Используй эмодзи уместно. Сообщение должно быть на русском языке.
+Будь профессиональным, но тёплым тоном."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_template}
+        ]
+
+        if context:
+            messages.insert(1, {"role": "user", "content": f"Контекст: {context}"})
+
+        response = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+
+        message = response.choices[0].message.content.strip()
+        print(f"[AI] Generated message: {message[:100]}...")
+        return message
+
+    except Exception as e:
+        print(f"[AI ERROR] {e}")
+        return None
+
+def generate_birthday_message(name, position, department):
+    """Генерация поздравления с днём рождения"""
+    prompt = f"""Напиши поздравление с днём рождения для коллеги:
+Имя: {name}
+Должность: {position}
+Отдел: {department}
+
+Требования:
+- Начни с эмодзи 🎉
+- Поздравь тепло и по-дружески
+- Упомяни должность и отдел
+- Пожелай успехов в работе и личной жизни
+- Максимум 4-5 предложений"""
+
+    return generate_ai_message(prompt)
+
+def generate_reminder_message(task_description, urgency="normal"):
+    """Генерация напоминания о задаче"""
+    urgency_text = {
+        "high": "СРОЧНО!",
+        "normal": "Напоминание:",
+        "low": "Не забудьте:"
+    }.get(urgency, "Напоминание:")
+
+    prompt = f"""{urgency_text} {task_description}
+
+Напиши краткое напоминание для рабочего чата.
+- Используй эмодзи 💡 или ⚠️
+- Будь лаконичным (2-3 предложения)
+- Укажи важность задачи"""
+
+    return generate_ai_message(prompt)
+
+def generate_daily_summary(tasks, events, birthdays):
+    """Генерация ежедневной сводки"""
+    context = f"""Задачи на сегодня: {tasks}
+События: {events}
+Дни рождения: {birthdays}"""
+
+    prompt = """Напиши утреннюю сводку для рабочего чата.
+Структура:
+📅 Доброе утро! Сегодня {дата}
+
+🎯 Задачи:
+[список]
+
+📢 События:
+[список]
+
+🎉 Дни рождения:
+[список или "Сегодня никто не празднует"]
+
+Хорошего дня! 💪"""
+
+    return generate_ai_message(prompt, context)
+
 # --- DATABASE ---
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -87,6 +173,17 @@ def init_db():
             (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, dt TEXT, period TEXT, weekdays TEXT, last_sent TEXT)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS sent_log 
             (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, ref_id INTEGER, sent_date TEXT, UNIQUE(type, ref_id, sent_date))''')
+
+        # Таблица для ИИ-задач
+        conn.execute('''CREATE TABLE IF NOT EXISTS ai_tasks 
+            (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+             name TEXT, 
+             prompt_template TEXT, 
+             context TEXT, 
+             schedule_time TEXT, 
+             period TEXT, 
+             is_active INTEGER DEFAULT 1,
+             last_sent TEXT)''')
         
         # Migrations
         cursor = conn.execute("PRAGMA table_info(events)")
@@ -140,7 +237,7 @@ def check_and_send():
             
             for person in celebrants:
                 bday_str = str(person['bday']).strip() if person['bday'] else ""
-                if extract_dm(bday_str) == now_dm:
+                if bday_str and bday_str.startswith(now_dm):
                     if not is_already_sent_today(conn, 'birthday', person['id'], today_str):
                         birthday_people.append(person)
             
@@ -504,6 +601,123 @@ def download_template(t_type):
     
     output.seek(0)
     return send_file(output, as_attachment=True, download_name=f"{t_type}_template.xlsx")
+
+
+# --- AI TASKS ROUTES ---
+@app.route('/ai_tasks')
+def ai_tasks():
+    """Страница управления ИИ-задачами"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    try:
+        tasks = conn.execute("SELECT * FROM ai_tasks ORDER BY id DESC").fetchall()
+    finally:
+        conn.close()
+
+    ai_enabled = openai_client is not None
+    return render_template('ai_tasks.html', tasks=tasks, ai_enabled=ai_enabled)
+
+@app.route('/add_ai_task', methods=['POST'])
+def add_ai_task():
+    """Добавление ИИ-задачи"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    if not openai_client:
+        flash("ИИ не настроен! Добавьте OPENAI_API_KEY")
+        return redirect(url_for('ai_tasks'))
+
+    try:
+        name = request.form.get('name', '').strip()
+        prompt_template = request.form.get('prompt_template', '').strip()
+        context = request.form.get('context', '').strip()
+        schedule_time = request.form.get('schedule_time', '')  # HH:MM
+        period = request.form.get('period', 'daily')
+
+        if not name or not prompt_template or not schedule_time:
+            flash("Заполните все обязательные поля!")
+            return redirect(url_for('ai_tasks'))
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                """INSERT INTO ai_tasks (name, prompt_template, context, schedule_time, period, is_active) 
+                   VALUES (?, ?, ?, ?, ?, 1)""",
+                (name, prompt_template, context, schedule_time, period)
+            )
+            conn.commit()
+            flash(f"✅ ИИ-задача '{name}' добавлена!")
+        finally:
+            conn.close()
+    except Exception as e:
+        flash(f"❌ Ошибка: {str(e)}")
+
+    return redirect(url_for('ai_tasks'))
+
+@app.route('/toggle_ai_task/<int:id>')
+def toggle_ai_task(id):
+    """Включение/выключение ИИ-задачи"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    try:
+        task = conn.execute("SELECT * FROM ai_tasks WHERE id = ?", (id,)).fetchone()
+        if task:
+            new_status = 0 if task['is_active'] else 1
+            conn.execute("UPDATE ai_tasks SET is_active = ? WHERE id = ?", (new_status, id))
+            conn.commit()
+            status_text = "включена" if new_status else "выключена"
+            flash(f"Задача {status_text}")
+    finally:
+        conn.close()
+
+    return redirect(url_for('ai_tasks'))
+
+@app.route('/delete_ai_task/<int:id>')
+def delete_ai_task(id):
+    """Удаление ИИ-задачи"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM ai_tasks WHERE id = ?", (id,))
+        conn.commit()
+        flash("Задача удалена")
+    finally:
+        conn.close()
+
+    return redirect(url_for('ai_tasks'))
+
+@app.route('/test_ai_task/<int:id>')
+def test_ai_task(id):
+    """Тестовая генерация сообщения для ИИ-задачи"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    if not openai_client:
+        flash("ИИ не настроен!")
+        return redirect(url_for('ai_tasks'))
+
+    conn = get_db_connection()
+    try:
+        task = conn.execute("SELECT * FROM ai_tasks WHERE id = ?", (id,)).fetchone()
+        if task:
+            message = generate_ai_message(task['prompt_template'], task['context'])
+            if message:
+                send_msg_threadsafe(f"🧪 Тест ИИ-задачи '{task['name']}':
+
+{message}")
+                flash("Тестовое сообщение отправлено!")
+            else:
+                flash("Ошибка генерации сообщения")
+    finally:
+        conn.close()
+
+    return redirect(url_for('ai_tasks'))
 
 # --- INIT ---
 init_db()
