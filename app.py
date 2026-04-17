@@ -262,7 +262,7 @@ def check_and_send():
     conn = get_db_connection()
     try:
         # 1. BIRTHDAYS (09:00 MSK)
-        if now.hour == 9 and now.minute <= 1:
+        if now.hour == 9 and now.minute <= 5:
             celebrants = conn.execute("SELECT * FROM birthdays").fetchall()
             birthday_people = []
             
@@ -349,6 +349,55 @@ def check_and_send():
                         conn.commit()
             except:
                 pass
+
+        # 4. AI TASKS (ИИ-задачи) - ИСПРАВЛЕНО
+        ai_tasks_list = conn.execute("SELECT * FROM ai_tasks WHERE is_active = 1").fetchall()
+        for task in ai_tasks_list:
+            try:
+                task_time = task['schedule_time']  # формат "HH:MM"
+                
+                # Проверяем время
+                if task_time == now_time_hm:
+                    # Проверяем периодичность
+                    should_send = False
+                    period = task['period']
+                    last_sent = task['last_sent']
+                    
+                    # Проверяем, не отправляли ли уже сегодня
+                    if last_sent == today_str:
+                        continue
+                    
+                    if period == 'daily':
+                        should_send = True
+                    elif period == 'workdays':
+                        should_send = current_weekday < 5  # Пн-Пт (0-4)
+                    elif period == 'weekly':
+                        should_send = True
+                    elif period == 'monthly':
+                        should_send = True
+                    elif period == 'once':
+                        should_send = True
+                    
+                    if should_send:
+                        # Генерируем сообщение через ИИ
+                        message = generate_ai_message(task['prompt_template'], task['context'])
+                        if message:
+                            send_msg_threadsafe(f"🤖 {task['name']}\n\n{message}")
+                            # Обновляем last_sent
+                            conn.execute(
+                                "UPDATE ai_tasks SET last_sent = ? WHERE id = ?",
+                                (today_str, task['id'])
+                            )
+                            conn.commit()
+                            
+                            # Если разовая задача — деактивируем
+                            if period == 'once':
+                                conn.execute("UPDATE ai_tasks SET is_active = 0 WHERE id = ?", (task['id'],))
+                                conn.commit()
+            except Exception as e:
+                print(f"[AI TASK ERROR] Task {task.get('id', 'unknown')}: {e}")
+                continue
+                
     finally:
         conn.close()
 
