@@ -436,7 +436,8 @@ def check_and_send():
                     # Генерируем сообщение через ИИ
                     message = generate_ai_message(task['prompt_template'], task['context'])
                     if message:
-                        send_msg_threadsafe(f"🤖 {task['name']}\n\n{message}")
+                        # Отправляем только сгенерированное ИИ сообщение, без заголовка
+                        send_msg_threadsafe(message)
                         # Обновляем last_sent
                         conn.execute(
                             "UPDATE ai_tasks SET last_sent = ? WHERE id = ?",
@@ -939,8 +940,8 @@ def test_ai_task(id):
         if task:
             message = generate_ai_message(task['prompt_template'], task['context'])
             if message:
-                test_msg = f"🧪 Тест ИИ-задачи '{task['name']}':\n\n{message}"
-                send_msg_threadsafe(test_msg)
+                # Отправляем только сгенерированное сообщение, без заголовка
+                send_msg_threadsafe(message)
                 flash("Тестовое сообщение отправлено!")
             else:
                 flash("Ошибка генерации сообщения")
