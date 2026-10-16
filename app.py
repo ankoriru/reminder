@@ -624,6 +624,103 @@ def upload_dr():
     
     return redirect(url_for('index'))
 
+# --- BIRTHDAYS CRUD ---
+def validate_bday_format(bday):
+    """Проверка формата ДД.ММ и корректности даты"""
+    if not bday or len(bday) != 5 or bday[2] != '.':
+        return False
+    try:
+        datetime.strptime(bday, "%d.%m")
+        return True
+    except ValueError:
+        return False
+
+@app.route('/add_birthday', methods=['POST'])
+def add_birthday():
+    """Добавление записи о дне рождения вручную"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    try:
+        full_name = request.form.get('full_name', '').strip()
+        pos = request.form.get('pos', '').strip()
+        dep = request.form.get('dep', '').strip()
+        bday = normalize_bday_date(request.form.get('bday', ''))
+
+        if not full_name:
+            flash("❌ Укажите фамилию и имя!", 'error')
+            return redirect(url_for('index'))
+
+        if not validate_bday_format(bday):
+            flash("❌ Дата должна быть в формате ДД.ММ (например, 15.03)", 'error')
+            return redirect(url_for('index'))
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "INSERT INTO birthdays (full_name, pos, dep, bday) VALUES (?,?,?,?)",
+                (full_name, pos, dep, bday)
+            )
+            conn.commit()
+            flash(f"✅ {full_name} добавлен(а) в список дней рождения!")
+        finally:
+            conn.close()
+    except Exception as e:
+        flash(f"❌ Ошибка: {str(e)}", 'error')
+
+    return redirect(url_for('index'))
+
+@app.route('/edit_birthday/<int:id>', methods=['POST'])
+def edit_birthday(id):
+    """Редактирование записи о дне рождения"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    try:
+        full_name = request.form.get('full_name', '').strip()
+        pos = request.form.get('pos', '').strip()
+        dep = request.form.get('dep', '').strip()
+        bday = normalize_bday_date(request.form.get('bday', ''))
+
+        if not full_name:
+            flash("❌ Укажите фамилию и имя!", 'error')
+            return redirect(url_for('index'))
+
+        if not validate_bday_format(bday):
+            flash("❌ Дата должна быть в формате ДД.ММ (например, 15.03)", 'error')
+            return redirect(url_for('index'))
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "UPDATE birthdays SET full_name=?, pos=?, dep=?, bday=? WHERE id=?",
+                (full_name, pos, dep, bday, id)
+            )
+            conn.commit()
+            flash(f"✅ Запись «{full_name}» обновлена!")
+        finally:
+            conn.close()
+    except Exception as e:
+        flash(f"❌ Ошибка: {str(e)}", 'error')
+
+    return redirect(url_for('index'))
+
+@app.route('/delete_birthday/<int:id>')
+def delete_birthday(id):
+    """Удаление записи о дне рождения"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM birthdays WHERE id = ?", (id,))
+        conn.commit()
+        flash("🗑️ Запись удалена из списка дней рождения")
+    finally:
+        conn.close()
+
+    return redirect(url_for('index'))
+
 @app.route('/upload_zs', methods=['POST'])
 def upload_zs():
     if not session.get('logged_in'):
