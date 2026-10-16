@@ -138,6 +138,56 @@
         .btn-test:hover { background: #e0a800; transform: translateY(-1px); }
 
         .btn-del { color: var(--danger); text-decoration: none; font-size: 18px; font-weight: bold; }
+
+        /* Кнопки действий в таблице */
+        .btn-edit, .btn-save, .btn-cancel {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            transition: 0.2s;
+            min-width: 44px;
+            min-height: 44px;
+        }
+        .btn-edit:hover { background: #e7f3ff; }
+        .btn-save:hover { background: #d4edda; }
+        .btn-cancel:hover { background: #f8d7da; }
+        td .btn-del { display: inline-block; padding: 6px 8px; border-radius: 8px; min-width: 44px; min-height: 44px; box-sizing: border-box; }
+        td .btn-del:hover { background: #f8d7da; }
+
+        /* Инлайн-редактирование строки */
+        .edit-input {
+            width: 100%;
+            padding: 8px 10px;
+            margin: 0;
+            border: 2px solid var(--primary);
+            border-radius: 8px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        tr.editing { background: #f0f7ff; }
+
+        /* Форма добавления сотрудника */
+        .dr-form-grid {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1.5fr 1fr;
+            gap: 12px;
+            align-items: start;
+        }
+        .dr-form-grid input { margin: 0; }
+
+        /* Мобильная адаптация */
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .content { padding: 20px 15px; }
+            .nav { flex-wrap: wrap; gap: 8px; }
+            .nav button, .nav a { padding: 12px 16px; font-size: 14px; }
+            .dr-form-grid { grid-template-columns: 1fr; }
+            th, td { padding: 10px 8px; font-size: 13px; }
+            .btn-test { float: none; display: inline-block; margin-bottom: 10px; }
+        }
         
         /* Сетка дней недели */
         .days-grid { 
@@ -178,6 +228,7 @@
             font-weight: 500;
         }
     </style>
+<base target="_blank">
 </head>
 <body>
 
@@ -217,11 +268,26 @@
             <a href="/download_template/dr" class="btn-template">📥 Скачать шаблон XLSX</a>
             
             <div class="form-box">
+                <h4 style="margin-top: 0;">➕ Добавить сотрудника вручную</h4>
+                <form action="/add_birthday" method="post">
+                    <div class="dr-form-grid">
+                        <input type="text" name="full_name" placeholder="Фамилия Имя *" required>
+                        <input type="text" name="pos" placeholder="Должность">
+                        <input type="text" name="dep" placeholder="Подразделение">
+                        <input type="text" name="bday" placeholder="ДД.ММ *" required pattern="\d{2}\.\d{2}" maxlength="5" title="Формат: ДД.ММ (например, 15.03)">
+                    </div>
+                    <button type="submit" style="margin-top: 15px;">➕ Добавить в список</button>
+                </form>
+            </div>
+
+            <div class="form-box">
+                <h4 style="margin-top: 0;">📤 Массовая загрузка из файла</h4>
                 <form action="/upload_dr" method="post" enctype="multipart/form-data">
                     <label style="font-weight: 600;">Загрузить файл (XLSX или CSV):</label>
                     <input type="file" name="file" accept=".xlsx,.xls,.csv" required style="border:none; padding: 10px 0;">
                     <button type="submit" style="background: var(--primary); width: auto; padding: 10px 25px;">🚀 Обновить базу данных</button>
                 </form>
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 0;">⚠️ Загрузка файла полностью заменяет текущий список</p>
             </div>
 
             <h4>📋 Текущий список ({{ bdays|length }} записей)</h4>
@@ -233,19 +299,24 @@
                             <th>Должность</th>
                             <th>Подразделение</th>
                             <th>День рождения</th>
+                            <th style="text-align: center;">Действия</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for b in bdays %}
-                        <tr>
-                            <td><b>{{ b.full_name }}</b></td>
-                            <td>{{ b.pos }}</td>
-                            <td>{{ b.dep }}</td>
-                            <td>{{ b.bday|dm }}</td>
+                        <tr data-id="{{ b.id }}">
+                            <td class="cell-full_name"><b>{{ b.full_name }}</b></td>
+                            <td class="cell-pos">{{ b.pos }}</td>
+                            <td class="cell-dep">{{ b.dep }}</td>
+                            <td class="cell-bday">{{ b.bday|dm }}</td>
+                            <td class="cell-actions" style="text-align: center; white-space: nowrap;">
+                                <button type="button" class="btn-edit" onclick="startEditBday(this)" title="Редактировать">✏️</button>
+                                <a href="/delete_birthday/{{ b.id }}" class="btn-del" title="Удалить" onclick="return confirm('Удалить {{ b.full_name }} из списка дней рождения?')">🗑️</a>
+                            </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="4" style="text-align: center; color: var(--text-muted);">Список пуст. Загрузите данные.</td>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted);">Список пуст. Добавьте сотрудника или загрузите файл.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -413,6 +484,81 @@
             const savedTab = localStorage.getItem('activeTab');
             if (savedTab) {
                 showTab(savedTab);
+            }
+        });
+
+        // --- Инлайн-редактирование дней рождения ---
+        function startEditBday(btn) {
+            const row = btn.closest('tr');
+            if (row.classList.contains('editing')) return;
+            // Отменяем редактирование другой строки, если есть
+            const other = document.querySelector('tr.editing');
+            if (other) cancelEditBday(other);
+
+            row.classList.add('editing');
+            ['full_name', 'pos', 'dep', 'bday'].forEach(function(field) {
+                const td = row.querySelector('.cell-' + field);
+                const val = td.textContent.trim();
+                td.dataset.orig = val; // сохраняем исходное значение для отмены
+                const extra = field === 'bday'
+                    ? ' pattern="\\d{2}\\.\\d{2}" maxlength="5" title="Формат: ДД.ММ"'
+                    : '';
+                td.innerHTML = '<input type="text" class="edit-input" value="' +
+                    val.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"' + extra + '>';
+            });
+            row.querySelector('.cell-full_name input').focus();
+            row.querySelector('.cell-actions').innerHTML =
+                '<button type="button" class="btn-save" onclick="saveEditBday(this)" title="Сохранить">💾</button>' +
+                '<button type="button" class="btn-cancel" onclick="cancelEditBday()" title="Отмена">❌</button>';
+        }
+
+        function saveEditBday(btn) {
+            const row = btn.closest('tr');
+            const bdayInput = row.querySelector('.cell-bday input');
+            if (!/^\d{2}\.\d{2}$/.test(bdayInput.value.trim())) {
+                alert('Дата должна быть в формате ДД.ММ (например, 15.03)');
+                bdayInput.focus();
+                return;
+            }
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/edit_birthday/' + row.dataset.id;
+            ['full_name', 'pos', 'dep', 'bday'].forEach(function(field) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = field;
+                input.value = row.querySelector('.cell-' + field + ' input').value.trim();
+                form.appendChild(input);
+            });
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        function cancelEditBday(row) {
+            // Восстанавливаем исходные значения без перезагрузки
+            row = row || document.querySelector('tr.editing');
+            if (!row) return;
+            ['full_name', 'pos', 'dep', 'bday'].forEach(function(field) {
+                const td = row.querySelector('.cell-' + field);
+                const val = td.dataset.orig !== undefined ? td.dataset.orig : td.querySelector('input').value;
+                td.innerHTML = field === 'full_name' ? '<b>' + escapeHtml(val) + '</b>' : escapeHtml(val);
+            });
+            row.querySelector('.cell-actions').innerHTML =
+                '<button type="button" class="btn-edit" onclick="startEditBday(this)" title="Редактировать">✏️</button>' +
+                '<a href="/delete_birthday/' + row.dataset.id + '" class="btn-del" title="Удалить" onclick="return confirm(\'Удалить запись из списка дней рождения?\')">🗑️</a>';
+            row.classList.remove('editing');
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Сохранение по Enter в режиме редактирования
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('edit-input')) {
+                e.preventDefault();
+                const saveBtn = e.target.closest('tr').querySelector('.btn-save');
+                if (saveBtn) saveBtn.click();
             }
         });
     </script>
