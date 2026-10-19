@@ -721,6 +721,110 @@ def delete_birthday(id):
 
     return redirect(url_for('index'))
 
+# --- EVENTS CRUD ---
+def parse_event_dt_input(dt_raw):
+    """Парсинг datetime-local (YYYY-MM-DDTHH:MM) -> datetime или None"""
+    if not dt_raw:
+        return None
+    try:
+        return datetime.strptime(dt_raw.strip(), '%Y-%m-%dT%H:%M')
+    except ValueError:
+        return None
+
+def event_is_sent_flag(dt_obj):
+    """Событие в прошлом считаем отправленным, в будущем — в очереди"""
+    return 0 if dt_obj > datetime.now() else 1
+
+@app.route('/add_event', methods=['POST'])
+def add_event():
+    """Добавление значимого события вручную"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    try:
+        event_name = request.form.get('event_name', '').strip()
+        reminder_text = request.form.get('reminder_text', '').strip()
+        dt_obj = parse_event_dt_input(request.form.get('dt', ''))
+
+        if not event_name:
+            flash("❌ Укажите название события!", 'error')
+            return redirect(url_for('index'))
+
+        if not dt_obj:
+            flash("❌ Укажите корректные дату и время события!", 'error')
+            return redirect(url_for('index'))
+
+        dt_final = dt_obj.strftime('%d.%m.%Y %H:%M:%S')
+        is_sent = event_is_sent_flag(dt_obj)
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "INSERT INTO events (event_name, reminder_text, dt, is_sent) VALUES (?,?,?,?)",
+                (event_name, reminder_text, dt_final, is_sent)
+            )
+            conn.commit()
+            flash(f"✅ Событие «{event_name}» добавлено!")
+        finally:
+            conn.close()
+    except Exception as e:
+        flash(f"❌ Ошибка: {str(e)}", 'error')
+
+    return redirect(url_for('index'))
+
+@app.route('/edit_event/<int:id>', methods=['POST'])
+def edit_event(id):
+    """Редактирование значимого события"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    try:
+        event_name = request.form.get('event_name', '').strip()
+        reminder_text = request.form.get('reminder_text', '').strip()
+        dt_obj = parse_event_dt_input(request.form.get('dt', ''))
+
+        if not event_name:
+            flash("❌ Укажите название события!", 'error')
+            return redirect(url_for('index'))
+
+        if not dt_obj:
+            flash("❌ Укажите корректные дату и время события!", 'error')
+            return redirect(url_for('index'))
+
+        dt_final = dt_obj.strftime('%d.%m.%Y %H:%M:%S')
+        is_sent = event_is_sent_flag(dt_obj)
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                "UPDATE events SET event_name=?, reminder_text=?, dt=?, is_sent=? WHERE id=?",
+                (event_name, reminder_text, dt_final, is_sent, id)
+            )
+            conn.commit()
+            flash(f"✅ Событие «{event_name}» обновлено!")
+        finally:
+            conn.close()
+    except Exception as e:
+        flash(f"❌ Ошибка: {str(e)}", 'error')
+
+    return redirect(url_for('index'))
+
+@app.route('/delete_event/<int:id>')
+def delete_event(id):
+    """Удаление значимого события"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM events WHERE id = ?", (id,))
+        conn.commit()
+        flash("🗑️ Событие удалено из списка")
+    finally:
+        conn.close()
+
+    return redirect(url_for('index'))
+
 @app.route('/upload_zs', methods=['POST'])
 def upload_zs():
     if not session.get('logged_in'):
