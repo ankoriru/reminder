@@ -577,7 +577,13 @@ def index():
     conn = get_db_connection()
     try:
         bdays = conn.execute("SELECT * FROM birthdays ORDER BY full_name").fetchall()
-        events = conn.execute("SELECT * FROM events ORDER BY is_sent ASC, dt ASC").fetchall()
+        # Двойная сортировка: сначала не отправленные (по возрастанию даты), затем отправленные (тоже по возрастанию).
+        # dt хранится как "ДД.ММ.ГГГГ ЧЧ:ММ:СС" — пересобираем в "ГГГГ-ММ-ДД ЧЧ:ММ:СС" для хронологического порядка.
+        events = conn.execute("""
+            SELECT * FROM events
+            ORDER BY is_sent ASC,
+                     substr(dt, 7, 4) || '-' || substr(dt, 4, 2) || '-' || substr(dt, 1, 2) || ' ' || substr(dt, 12) ASC
+        """).fetchall()
         customs = conn.execute("SELECT * FROM custom_tasks ORDER BY dt ASC").fetchall()
     finally:
         conn.close()
