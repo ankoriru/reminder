@@ -15,9 +15,9 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-3"
+VERSION = "2026.11.25-4"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
-JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "384"))
+JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bridge")
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -48,6 +48,18 @@ def ev(msg: str, level=logging.INFO):
     events.appendleft(f"{time.strftime('%d.%m %H:%M:%S')}  {msg}")
 
 
+def _browser_exe(pw) -> str:
+    """chrome-headless-shell вдвое легче полного Chromium; если его нет в образе — обычный."""
+    import glob
+    roots = [os.getenv("PLAYWRIGHT_BROWSERS_PATH", ""), "/ms-playwright",
+             str(Path.home() / ".cache/ms-playwright")]
+    for r in roots:
+        found = sorted(glob.glob(f"{r}/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell")) if r else []
+        if found:
+            return found[-1]
+    return pw.chromium.executable_path
+
+
 class Express:
     def __init__(self):
         self.lock = asyncio.Lock()
@@ -73,15 +85,15 @@ class Express:
             self.proc.kill()
         with socket.socket() as sk:
             sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
-        cmd = ["nice", "-n", "15", self.pw.chromium.executable_path, "--headless=new",
+        cmd = ["nice", "-n", "15", _browser_exe(self.pw), "--headless",
                f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
                "--disable-extensions", "--disable-background-networking", "--disable-sync",
                "--disable-component-update", "--disable-default-apps", "--no-first-run",
-               "--mute-audio", "--renderer-process-limit=1", "--no-zygote",
+               "--mute-audio", "--single-process", "--enable-low-end-device-mode",
                "--disable-features=site-per-process,Translate,MediaRouter,OptimizationHints",
                f"--js-flags=--max-old-space-size={JS_HEAP_MB}",
-               "--window-size=1280,800", "--lang=ru-RU", "about:blank"]
+               "--window-size=900,700", "--lang=ru-RU", "about:blank"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:   # при нехватке памяти ядро должно убить Chromium, а не процесс с напоминаниями
             Path(f"/proc/{self.proc.pid}/oom_score_adj").write_text("1000")
@@ -367,16 +379,8 @@ async def _main():
     session = AiohttpSession(api=TelegramAPIServer.from_base(TG_API_BASE)) if TG_API_BASE else None
     bot = Bot(TG_TOKEN, session=session) if session else Bot(TG_TOKEN)
     ev(f"мост запущен, версия {VERSION}")
-    while True:
-        try:
-            await ex.start()
-            break
-        except Exception as e:
-            state["browser"] = f"ошибка запуска: {str(e)[:150]}"
-            ev(f"браузер не запустился, повтор через 60 с: {e}", logging.ERROR)
-            await asyncio.sleep(60)
-    if not await ex.check_login():
-        ev("нужен вход в eXpress по QR-коду", logging.WARNING)
+    # браузер при старте не запускаем: он нужен только для отправки и для входа по QR
+    state["browser"] = "спит (запустится при новом сообщении или на вкладке моста)"
     asyncio.create_task(ex.watchdog())
     # handle_as_tasks=False: строго по порядку; необработанные апдейты Telegram отдаст повторно
     while True:

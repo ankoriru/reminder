@@ -11,6 +11,9 @@ RUN for i in 1 2 3 4 5; do \
       [ $i -eq 5 ] && exit 1; \
     done && \
     python -c "import playwright, flask, aiogram, pandas; print('deps ok')"
+# лёгкий chrome-headless-shell (если в базовом образе его нет — докачиваем; не критично)
+RUN ls /ms-playwright; ls /ms-playwright | grep -q headless_shell || \
+    (for i in 1 2 3; do playwright install chromium-headless-shell && break; sleep 15; done) || true
 COPY . .
 EXPOSE 80
 CMD ["python", "run.py"]

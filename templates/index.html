@@ -529,6 +529,7 @@
             try {
                 const r = await fetch('/bridge/status', {cache: 'no-store'});
                 if (r.status === 401) { location.href = '/login'; return; }
+                if (!r.ok) throw new Error('сервер ответил ' + r.status + ', возможно, приложение перезапускается');
                 var d = await r.json();
                 const info = document.getElementById('br-info'); info.innerHTML = '';
                 if (!d.enabled) info.appendChild(bridgeLine('Статус', 'выключен: задайте EXPRESS_CHAT_NAME'));
