@@ -6,7 +6,7 @@
   * aiohttp отдаёт защищённую паролем страницу статуса с живым скриншотом (для входа по QR).
 """
 import asyncio, base64, hmac, logging, os, re, tempfile, time
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-5"
+VERSION = "2026.11.25-6"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -365,6 +365,37 @@ def media(m: Message):
     return None, None, False
 
 
+# последние тексты по id сообщения: чтобы не слать правку, если текст не изменился, и показать «было»
+_texts: "OrderedDict[int, str]" = OrderedDict()
+
+
+def _remember(mid: int, text: str):
+    _texts[mid] = text
+    _texts.move_to_end(mid)
+    while len(_texts) > 500:
+        _texts.popitem(last=False)
+
+
+@dp.edited_message()
+@dp.edited_channel_post()
+async def on_edit(m: Message):
+    if m.chat.id != TG_CHAT_ID:
+        return
+    body = m.text or m.caption or ""
+    old = _texts.get(m.message_id)
+    if old is not None and old == body:
+        return                          # меняли не текст (например, реакции или превью ссылки)
+    _remember(m.message_id, body)
+    head = f"{author(m)} (изменено):"
+    if old:
+        head += f"\n» было: {old.replace(chr(10), ' ')[:120]}"
+    try:
+        await ex.send(f"{head}\n{body or '[текст удалён]'}".strip())
+        ev(f"переслана правка сообщения {m.message_id} от {author(m)}")
+    except Exception as e:
+        ev(f"правка сообщения {m.message_id} не переслана: {e}", logging.ERROR)
+
+
 @dp.message()
 @dp.channel_post()
 async def on_message(m: Message):
@@ -378,6 +409,7 @@ async def on_message(m: Message):
         q = (m.reply_to_message.text or m.reply_to_message.caption or "[вложение]").replace("\n", " ")
         head += f"\n» {q[:120]}"
     body = m.text or m.caption or ""
+    _remember(m.message_id, body)
     obj, name, is_photo = media(m)
     path = None
     try:
@@ -415,7 +447,7 @@ async def _main():
         try:
             state["telegram"] = "подключён"
             await dp.start_polling(bot, handle_as_tasks=False, handle_signals=False,
-                                   allowed_updates=["message", "channel_post"])
+                                   allowed_updates=["message", "channel_post", "edited_message", "edited_channel_post"])
         except Exception as e:
             state["telegram"] = f"ошибка: {str(e)[:150]}"
             ev(f"Telegram недоступен, повтор через 30 с: {e}", logging.ERROR)
