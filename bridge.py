@@ -15,7 +15,8 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.24-2"
+VERSION = "2026.11.24-3"
+JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "384"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bridge")
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -51,17 +52,48 @@ class Express:
         self.lock = asyncio.Lock()
         self.page = None
         self.ctx = None
+        self.pw = None
+        self.proc = None
+        self.browser = None
 
     async def start(self):
-        pw = await async_playwright().start()
+        """Chromium запускается отдельным процессом с низким приоритетом (nice 15) и
+        урезанной памятью, чтобы не душить Flask и напоминания; Playwright цепляется по CDP."""
+        import subprocess, socket
+        self.pw = self.pw or await async_playwright().start()
         profile = DATA / "chrome-profile"
         profile.mkdir(parents=True, exist_ok=True)
         for f in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
             (profile / f).unlink(missing_ok=True)     # остатки после перезапуска контейнера
-        self.ctx = await pw.chromium.launch_persistent_context(
-            str(profile), headless=True, locale="ru-RU", timezone_id="Europe/Moscow",
-            viewport={"width": 1400, "height": 900},
-            args=["--no-sandbox", "--disable-dev-shm-usage"])
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
+        cmd = ["nice", "-n", "15", self.pw.chromium.executable_path, "--headless=new",
+               f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
+               "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+               "--disable-extensions", "--disable-background-networking", "--disable-sync",
+               "--disable-component-update", "--disable-default-apps", "--no-first-run",
+               "--mute-audio", "--renderer-process-limit=1", "--no-zygote",
+               "--disable-features=site-per-process,Translate,MediaRouter,OptimizationHints",
+               f"--js-flags=--max-old-space-size={JS_HEAP_MB}",
+               "--window-size=1280,800", "--lang=ru-RU", "about:blank"]
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:   # при нехватке памяти ядро должно убить Chromium, а не процесс с напоминаниями
+            Path(f"/proc/{self.proc.pid}/oom_score_adj").write_text("1000")
+        except OSError:
+            pass
+        for _ in range(60):
+            try:
+                self.browser = await self.pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                break
+            except Exception:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(f"Chromium завершился с кодом {self.proc.returncode}")
+                await asyncio.sleep(1)
+        else:
+            raise RuntimeError("Chromium не ответил за 60 с")
+        self.ctx = self.browser.contexts[0]
         self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
         state["browser"] = "работает"
         ev("браузер запущен")
@@ -181,11 +213,15 @@ class Express:
 
     async def watchdog(self):
         while True:
-            await asyncio.sleep(300)
+            await asyncio.sleep(120)
             if self.lock.locked():
                 continue
             async with self.lock:
                 try:
+                    if self.proc and self.proc.poll() is not None:
+                        ev(f"Chromium завершился (код {self.proc.returncode}), перезапуск", logging.ERROR)
+                        state["browser"] = "перезапуск"
+                        await self.start()
                     await self.check_login()
                 except Exception as e:
                     ev(f"watchdog: {e}", logging.ERROR)
