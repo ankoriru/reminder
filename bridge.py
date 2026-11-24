@@ -10,12 +10,14 @@ from collections import OrderedDict, deque
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-7"
+VERSION = "2026.11.25-8"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -29,6 +31,8 @@ TG_API_BASE = os.environ.get("TG_API_BASE", "").rstrip("/")      # необяз�
 EX_CHAT = os.environ.get("EXPRESS_CHAT_NAME", "").strip()        # пусто = мост выключен
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 DATA = Path(os.environ.get("DATA_DIR", "/data"))
+DEL_CHECK_SEC = int(os.getenv("DELETE_CHECK_SEC", "300"))     # как часто проверять удаления в Telegram
+DEL_WINDOW_H = int(os.getenv("DELETE_WINDOW_HOURS", "48"))    # за какой срок отслеживать удаления
 MAX_FILE = int(os.environ.get("MAX_FILE_MB", "20")) * 1024 * 1024
 WEB_URL = "https://corp.express/"
 
@@ -263,21 +267,11 @@ class Express:
                     return False
                 await self.open_chat()
                 p = self.page
-                msg = p.locator(f'.chat-message[id="{ex_id}"]')
-                for _ in range(15):                 # старые сообщения подгружаются при прокрутке вверх
-                    if await msg.count():
-                        break
-                    await p.evaluate("() => { const c = document.querySelector('.chat-message')?.parentElement; "
-                                     "let e = c; while (e && e.scrollHeight <= e.clientHeight) e = e.parentElement; "
-                                     "if (e) e.scrollTop = 0; }")
-                    await p.wait_for_timeout(1200)
-                if not await msg.count():
+                msg = await self._find_my(ex_id)
+                if msg is None:
                     ev(f"сообщение {ex_id} не найдено в чате eXpress", logging.WARNING)
                     return False
-                if await msg.first.locator(".chat-message__bubble--my").count() == 0:
-                    return False
-                await msg.first.scroll_into_view_if_needed()
-                await msg.first.locator(".chat-message__bubble").first.click(button="right")
+                await msg.locator(".chat-message__bubble").first.click(button="right")
                 await p.wait_for_timeout(600)
                 item = p.locator(".message-menu__root-item").filter(
                     has_text=re.compile(r"^\s*(Edit|Изменить|Редактировать)\s*$"))
@@ -296,13 +290,78 @@ class Express:
                 want = next((l for l in text.split("\n")[::-1] if l.strip()), "")[:60]
                 for _ in range(16):
                     await p.wait_for_timeout(500)
-                    if want in (await msg.first.inner_text()) and await self._composer_empty():
+                    if want in (await msg.inner_text()) and await self._composer_empty():
                         self.last_used = time.time()
                         return True
                 raise RuntimeError("текст сообщения не обновился")
             except Exception as e:
                 state["last_error"] = f"{time.strftime('%H:%M:%S')} правка: {e}"
                 ev(f"ошибка правки {ex_id}: {e}", logging.ERROR)
+                try:
+                    await self.page.reload(wait_until="commit", timeout=120000)
+                except Exception:
+                    pass
+                return False
+
+    async def _find_my(self, ex_id: str):
+        p = self.page
+        msg = p.locator(f'.chat-message[id="{ex_id}"]')
+        for _ in range(15):                 # старые сообщения подгружаются при прокрутке вверх
+            if await msg.count():
+                break
+            await p.evaluate("() => { const c = document.querySelector('.chat-message')?.parentElement; "
+                             "let e = c; while (e && e.scrollHeight <= e.clientHeight) e = e.parentElement; "
+                             "if (e) e.scrollTop = 0; }")
+            await p.wait_for_timeout(1200)
+        if not await msg.count() or await msg.first.locator(".chat-message__bubble--my").count() == 0:
+            return None
+        await msg.first.scroll_into_view_if_needed()
+        return msg.first
+
+    async def delete(self, ex_id: str) -> bool | None:
+        """Удаляет своё сообщение в eXpress у всех по его id. None — сообщение не найдено."""
+        if not state["logged_in"]:
+            return False
+        async with self.lock:
+            try:
+                await self.awake()
+                if not await self.check_login():
+                    return False
+                await self.open_chat()
+                p = self.page
+                msg = await self._find_my(ex_id)
+                if msg is None:
+                    ev(f"сообщение {ex_id} не найдено в чате eXpress (возможно, уже удалено)", logging.WARNING)
+                    return None
+                await msg.locator(".chat-message__bubble").first.click(button="right")
+                await p.wait_for_timeout(600)
+                item = p.locator(".message-menu__root-item").filter(
+                    has_text=re.compile(r"^\s*(Delete|Удалить)\s*$"))
+                if not await item.count():
+                    await p.keyboard.press("Escape")
+                    ev("в меню сообщения нет пункта «Удалить»", logging.WARNING)
+                    return False
+                await item.first.evaluate("e => e.click()")
+                await p.wait_for_timeout(800)
+                act = p.locator("span.message-input__operator--actions").filter(
+                    has_text=re.compile(r"^\s*(Delete|Удалить)\s*$"))
+                await act.first.click(timeout=10000)
+                modal = p.locator(".ReactModal__Content")
+                await modal.first.wait_for(timeout=10000)
+                cb = modal.first.locator("input[type=checkbox]")
+                if await cb.count() and not await cb.first.is_checked():
+                    await cb.first.evaluate("e => e.click()")     # «Удалить у всех»
+                await modal.first.locator(".button--contained--negative").first.click(timeout=10000)
+                for _ in range(16):
+                    await p.wait_for_timeout(500)
+                    gone = await p.locator(f'.chat-message[id="{ex_id}"]').count() == 0
+                    if gone or re.search(r"(deleted|удален)", await msg.inner_text(), re.I):
+                        self.last_used = time.time()
+                        return True
+                raise RuntimeError("сообщение не удалилось")
+            except Exception as e:
+                state["last_error"] = f"{time.strftime('%H:%M:%S')} удаление: {e}"
+                ev(f"ошибка удаления {ex_id}: {e}", logging.ERROR)
                 try:
                     await self.page.reload(wait_until="commit", timeout=120000)
                 except Exception:
@@ -464,6 +523,97 @@ def _remember(mid: int, **kw):
         log.warning(f"не удалось сохранить {MAP_FILE}: {e}")
 
 
+# ---------- удаления: Bot API не сообщает боту об удалённых сообщениях ----------
+# Поэтому мост раз в DEL_CHECK_SEC пробует переслать недавние сообщения в служебный чат:
+# если Telegram отвечает «сообщение не найдено» — его удалили, и мост удаляет копию в eXpress.
+# Пересланные копии в служебном чате сразу удаляются.
+SERVICE_FILE = DATA / "bridge_service.json"
+
+
+def _service_chat() -> int:
+    env = int(os.getenv("TG_SERVICE_CHAT_ID", "0") or 0)
+    if env:
+        return env
+    try:
+        return int(json.loads(SERVICE_FILE.read_text())["chat_id"])
+    except Exception:
+        return 0
+
+
+@dp.message(Command("bridge_service"))
+@dp.channel_post(Command("bridge_service"))
+async def on_service(m: Message):
+    if m.chat.id == TG_CHAT_ID:
+        await m.reply("Это основной чат. Отправьте команду в личном чате с ботом или в отдельном закрытом канале.")
+        return
+    SERVICE_FILE.write_text(json.dumps({"chat_id": m.chat.id}))
+    ev(f"служебный чат для отслеживания удалений: {m.chat.id}")
+    await m.answer("Готово: этот чат будет служебным для отслеживания удалений. "
+                   "Здесь могут на секунду появляться и сразу исчезать копии сообщений.")
+
+
+def _is_missing(e: Exception) -> bool:
+    t = str(e).lower()
+    return "not found" in t or "message_id_invalid" in t or "can't be forwarded" in t
+
+
+async def _probe(service: int, ids: list[int]) -> list[int]:
+    """Возвращает id сообщений, которых больше нет в Telegram."""
+    gone, copies = [], []
+    try:
+        res = await bot.forward_messages(service, TG_CHAT_ID, ids, disable_notification=True)
+        copies = [r.message_id for r in res]
+        if len(copies) < len(ids):            # кого-то нет — проверяем по одному
+            for i in ids:
+                try:
+                    r = await bot.forward_message(service, TG_CHAT_ID, i, disable_notification=True)
+                    copies.append(r.message_id)
+                except TelegramBadRequest as e:
+                    if _is_missing(e):
+                        gone.append(i)
+                await asyncio.sleep(0.05)
+    finally:
+        for k in range(0, len(copies), 100):
+            try:
+                await bot.delete_messages(service, copies[k:k + 100])
+            except Exception as e:
+                log.warning(f"не удалось убрать копии из служебного чата: {e}")
+    return gone
+
+
+async def deletion_watch():
+    warned = False
+    while True:
+        await asyncio.sleep(DEL_CHECK_SEC)
+        service = _service_chat()
+        if not service:
+            if not warned:
+                ev("удаления не отслеживаются: отправьте боту в личном чате команду /bridge_service",
+                   logging.WARNING)
+                warned = True
+            continue
+        if not state["logged_in"]:
+            continue
+        since = time.time() - DEL_WINDOW_H * 3600
+        ids = sorted(int(k) for k, r in _map.items()
+                     if r.get("ex") and not r.get("deleted") and r.get("ts", 0) >= since)
+        for k in range(0, len(ids), 100):
+            try:
+                gone = await _probe(service, ids[k:k + 100])
+            except Exception as e:
+                ev(f"проверка удалений: {e}", logging.ERROR)
+                break
+            for i in gone:
+                rec = _map[str(i)]
+                ok = await ex.delete(rec["ex"])
+                if ok or ok is None or rec.get("del_fail", 0) >= 2:
+                    _remember(i, deleted=True)
+                    ev(f"сообщение {i} удалено в Telegram — " + ("удалено и в eXpress" if ok else
+                       "в eXpress не найдено" if ok is None else "удалить в eXpress не удалось"))
+                else:
+                    _remember(i, del_fail=rec.get("del_fail", 0) + 1)
+
+
 @dp.edited_message()
 @dp.edited_channel_post()
 async def on_edit(m: Message):
@@ -486,7 +636,8 @@ async def on_edit(m: Message):
         if old:
             head += f"\n» было: {old.replace(chr(10), ' ')[:120]}"
         ex_id = await ex.send(f"{head}\n{body or '[текст удалён]'}".strip())
-        _remember(m.message_id, text=body, ex=ex_id, head=f"{author(m)} (изменено):")
+        _remember(m.message_id, text=body, ex=ex_id, head=f"{author(m)} (изменено):",
+                  ts=rec.get("ts") or int(time.time()))
         ev(f"правка сообщения {m.message_id} от {author(m)} отправлена новым сообщением")
     except Exception as e:
         ev(f"правка сообщения {m.message_id} не переслана: {e}", logging.ERROR)
@@ -505,7 +656,7 @@ async def on_message(m: Message):
         q = (m.reply_to_message.text or m.reply_to_message.caption or "[вложение]").replace("\n", " ")
         head += f"\n» {q[:120]}"
     body = m.text or m.caption or ""
-    _remember(m.message_id, text=body, head=head)
+    _remember(m.message_id, text=body, head=head, ts=int(time.time()))
     obj, name, is_photo = media(m)
     path = None
     try:
@@ -540,6 +691,7 @@ async def _main():
     # браузер при старте не запускаем: он нужен только для отправки и для входа по QR
     state["browser"] = "спит (запустится при новом сообщении или на вкладке моста)"
     asyncio.create_task(ex.watchdog())
+    asyncio.create_task(deletion_watch())
     # handle_as_tasks=False: строго по порядку; необработанные апдейты Telegram отдаст повторно
     while True:
         try:
