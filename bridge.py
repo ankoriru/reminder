@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-2"
+VERSION = "2026.11.25-3"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "384"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -62,7 +62,9 @@ class Express:
         """Chromium запускается отдельным процессом с низким приоритетом (nice 15) и
         урезанной памятью, чтобы не душить Flask и напоминания; Playwright цепляется по CDP."""
         import subprocess, socket
-        self.pw = self.pw or await async_playwright().start()
+        if not self.pw:
+            self.pw = await async_playwright().start()
+            _renice_children()   # драйвер Playwright (node) тоже на низкий приоритет
         profile = DATA / "chrome-profile"
         profile.mkdir(parents=True, exist_ok=True)
         for f in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
@@ -96,19 +98,17 @@ class Express:
         else:
             raise RuntimeError("Chromium не ответил за 60 с")
         self.ctx = self.browser.contexts[0]
-        await self.ctx.route("**/*", self._filter)
         self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
+        try:   # блокировка внутри Chromium, без пересылки каждого запроса в Python
+            cdp = await self.ctx.new_cdp_session(self.page)
+            await cdp.send("Network.enable")
+            await cdp.send("Network.setBlockedURLs", {"urls": [
+                "*.ttf*", "*.woff*", "*.otf*", "*sentry*", "*.mp4*", "*.mp3*", "*.webm*", "*.ogg*"]})
+        except Exception as e:
+            ev(f"не удалось включить блокировку ресурсов: {e}", logging.WARNING)
         state["browser"] = "работает"
         ev("браузер запущен")
         await self.ensure_page()
-
-    @staticmethod
-    async def _filter(route):
-        r = route.request
-        if r.resource_type in ("font", "media") or "sentry" in r.url:
-            await route.abort()
-        else:
-            await route.continue_()
 
     def running(self) -> bool:
         return bool(self.proc and self.proc.poll() is None and self.page)
@@ -208,12 +208,25 @@ class Express:
 
     async def send(self, text: str, file_path: str | None = None, is_photo=False):
         marker = next((l for l in (text or "").split("\n")[::-1] if l.strip()), "")[:60]
+        warned = False
+        while True:                    # без входа браузер не держим: ждём, пока войдут через панель
+            async with self.lock:
+                await self.awake()
+                if await self.check_login():
+                    break
+                self.last_used = 0     # пусть watchdog закроет браузер, если панель не открыта
+            if not warned:
+                ev("сообщение ждёт входа в eXpress: откройте вкладку моста и отсканируйте QR-код",
+                   logging.WARNING)
+                warned = True
+            while not state["logged_in"]:
+                await asyncio.sleep(30)
         async with self.lock:
             for attempt in range(1, 4):
                 try:
                     await self.awake()
-                    while not await self.check_login():       # ждём, пока войдут по QR
-                        await asyncio.sleep(30)
+                    if not await self.check_login():
+                        raise RuntimeError("вход в eXpress потерян")
                     await self.open_chat()
                     p = self.page
                     if attempt > 1 and marker and marker in await self._last_outgoing():
@@ -253,6 +266,7 @@ class Express:
             raise RuntimeError("не удалось отправить после 3 попыток")
 
     async def watchdog(self):
+        """Раз в 30 с: закрыть браузер после простоя; пока открыта панель без входа — ловить вход по QR."""
         while True:
             await asyncio.sleep(30)
             if self.lock.locked():
@@ -264,17 +278,27 @@ class Express:
                         self.proc = self.page = self.ctx = self.browser = None
                         state["browser"] = "спит (запустится при новом сообщении)"
                     if not self.running():
-                        if not state["logged_in"]:          # нужен вход: держим QR-код на экране
-                            await self.awake()
-                            await self.check_login()
                         continue
-                    if not state["logged_in"]:
-                        await self.check_login()
-                        self.last_used = time.time() if not state["logged_in"] else self.last_used
-                    elif time.time() - self.last_used > IDLE_SEC:
+                    if time.time() - self.last_used > IDLE_SEC:
                         await self.sleep(f" после {IDLE_SEC} с простоя")
+                    elif not state["logged_in"]:
+                        await self.check_login()
                 except Exception as e:
                     ev(f"watchdog: {e}", logging.ERROR)
+
+
+def _renice_children(nice=15):
+    try:
+        for d in Path("/proc").iterdir():
+            if d.name.isdigit():
+                try:
+                    st = (d / "stat").read_text().split()
+                    if int(st[3]) == os.getpid():
+                        os.setpriority(os.PRIO_PROCESS, int(d.name), nice)
+                except (OSError, ValueError, IndexError):
+                    pass
+    except OSError:
+        pass
 
 
 ex = Express()
@@ -432,10 +456,18 @@ def register(flask_app):
     def bridge_shot():
         if (r := need_auth()):
             return r
-        if not ex.running():
-            return Response("браузер спит", 503)
-        png = _run(ex.page.screenshot(type="png"), 20)
-        return Response(png, mimetype="image/png", headers={"Cache-Control": "no-store"})
+        async def shot():
+            if not ex.running():
+                async with ex.lock:
+                    await ex.awake()
+                    await ex.ensure_page()
+            ex.last_used = time.time()          # панель открыта — браузер не усыпляем
+            return await ex.page.screenshot(type="jpeg", quality=60)
+        try:
+            img = _run(shot(), 150)
+        except Exception as e:
+            return Response(f"браузер не готов: {e}", 503)
+        return Response(img, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @flask_app.post("/bridge/reload")
     def bridge_reload():
