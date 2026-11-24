@@ -5,7 +5,7 @@
   * Playwright держит открытую веб-версию eXpress с постоянным профилем в /data;
   * aiohttp отдаёт защищённую паролем страницу статуса с живым скриншотом (для входа по QR).
 """
-import asyncio, base64, hmac, logging, os, re, tempfile, time
+import asyncio, base64, hmac, json, logging, os, re, tempfile, time
 from collections import OrderedDict, deque
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-6"
+VERSION = "2026.11.25-7"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -246,7 +246,71 @@ class Express:
             "() => { const m = [...document.querySelectorAll('.chat-message')]; "
             "return m.length ? m[m.length - 1].innerText : ''; }")
 
-    async def send(self, text: str, file_path: str | None = None, is_photo=False):
+    async def _last_my_id(self) -> str | None:
+        return await self.page.evaluate(
+            "() => { const m = [...document.querySelectorAll('.chat-message')]"
+            ".filter(e => e.querySelector('.chat-message__bubble--my')); "
+            "return m.length ? m[m.length - 1].id || null : null; }")
+
+    async def edit(self, ex_id: str, text: str) -> bool:
+        """Правит своё сообщение в eXpress по его id. False — сообщение не найдено или правка не удалась."""
+        if not state["logged_in"]:
+            return False
+        async with self.lock:
+            try:
+                await self.awake()
+                if not await self.check_login():
+                    return False
+                await self.open_chat()
+                p = self.page
+                msg = p.locator(f'.chat-message[id="{ex_id}"]')
+                for _ in range(15):                 # старые сообщения подгружаются при прокрутке вверх
+                    if await msg.count():
+                        break
+                    await p.evaluate("() => { const c = document.querySelector('.chat-message')?.parentElement; "
+                                     "let e = c; while (e && e.scrollHeight <= e.clientHeight) e = e.parentElement; "
+                                     "if (e) e.scrollTop = 0; }")
+                    await p.wait_for_timeout(1200)
+                if not await msg.count():
+                    ev(f"сообщение {ex_id} не найдено в чате eXpress", logging.WARNING)
+                    return False
+                if await msg.first.locator(".chat-message__bubble--my").count() == 0:
+                    return False
+                await msg.first.scroll_into_view_if_needed()
+                await msg.first.locator(".chat-message__bubble").first.click(button="right")
+                await p.wait_for_timeout(600)
+                item = p.locator(".message-menu__root-item").filter(
+                    has_text=re.compile(r"^\s*(Edit|Изменить|Редактировать)\s*$"))
+                if not await item.count():
+                    await p.keyboard.press("Escape")
+                    ev("в меню сообщения нет пункта «Изменить»", logging.WARNING)
+                    return False
+                await item.first.evaluate("e => e.click()")   # меню бывает за краем окна
+                await p.wait_for_timeout(800)
+                box = p.locator(S_INPUT).first
+                await box.click()
+                await p.keyboard.press("Control+A")
+                await p.keyboard.press("Delete")
+                await self._type(text or " ")
+                await p.keyboard.press("Enter")
+                want = next((l for l in text.split("\n")[::-1] if l.strip()), "")[:60]
+                for _ in range(16):
+                    await p.wait_for_timeout(500)
+                    if want in (await msg.first.inner_text()) and await self._composer_empty():
+                        self.last_used = time.time()
+                        return True
+                raise RuntimeError("текст сообщения не обновился")
+            except Exception as e:
+                state["last_error"] = f"{time.strftime('%H:%M:%S')} правка: {e}"
+                ev(f"ошибка правки {ex_id}: {e}", logging.ERROR)
+                try:
+                    await self.page.reload(wait_until="commit", timeout=120000)
+                except Exception:
+                    pass
+                return False
+
+    async def send(self, text: str, file_path: str | None = None, is_photo=False) -> str | None:
+        """Отправляет сообщение; возвращает id своего сообщения в eXpress (или None)."""
         marker = next((l for l in (text or "").split("\n")[::-1] if l.strip()), "")[:60]
         warned = False
         while True:                    # без входа браузер не держим: ждём, пока войдут через панель
@@ -273,7 +337,7 @@ class Express:
                         ev("сообщение уже доставлено предыдущей попыткой — повтор пропущен")
                         state["sent"] += 1
                         state["last_ok"] = time.time()
-                        return
+                        return await self._last_my_id()
                     if not await self._composer_empty():          # остатки прошлой попытки
                         for b in await p.locator(".input-attachment__file button").all():
                             await b.click()
@@ -293,7 +357,10 @@ class Express:
                         raise RuntimeError("сообщение осталось в поле ввода")
                     state["sent"] += 1
                     state["last_ok"] = self.last_used = time.time()
-                    return
+                    try:
+                        return await self._last_my_id()
+                    except Exception:
+                        return None
                 except Exception as e:
                     state["last_error"] = f"{time.strftime('%H:%M:%S')} {e}"
                     ev(f"попытка {attempt}: ошибка отправки: {e}", logging.ERROR)
@@ -365,15 +432,36 @@ def media(m: Message):
     return None, None, False
 
 
-# последние тексты по id сообщения: чтобы не слать правку, если текст не изменился, и показать «было»
-_texts: "OrderedDict[int, str]" = OrderedDict()
+# соответствие сообщений Telegram -> eXpress: {tg_id: {"ex": id в eXpress, "head": заголовок, "text": текст}}
+# хранится в /data, чтобы правки работали и после перезапуска
+MAP_FILE = DATA / "bridge_map.json"
+MAP_MAX = 1000
 
 
-def _remember(mid: int, text: str):
-    _texts[mid] = text
-    _texts.move_to_end(mid)
-    while len(_texts) > 500:
-        _texts.popitem(last=False)
+def _load_map() -> "OrderedDict[str, dict]":
+    try:
+        return OrderedDict(json.loads(MAP_FILE.read_text()))
+    except Exception:
+        return OrderedDict()
+
+
+_map = _load_map()
+
+
+def _remember(mid: int, **kw):
+    k = str(mid)
+    rec = _map.get(k, {})
+    rec.update({a: b for a, b in kw.items() if b is not None})
+    _map[k] = rec
+    _map.move_to_end(k)
+    while len(_map) > MAP_MAX:
+        _map.popitem(last=False)
+    try:
+        tmp = MAP_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_map, ensure_ascii=False))
+        tmp.replace(MAP_FILE)
+    except Exception as e:
+        log.warning(f"не удалось сохранить {MAP_FILE}: {e}")
 
 
 @dp.edited_message()
@@ -382,16 +470,24 @@ async def on_edit(m: Message):
     if m.chat.id != TG_CHAT_ID:
         return
     body = m.text or m.caption or ""
-    old = _texts.get(m.message_id)
+    rec = _map.get(str(m.message_id), {})
+    old = rec.get("text")
     if old is not None and old == body:
         return                          # меняли не текст (например, реакции или превью ссылки)
-    _remember(m.message_id, body)
-    head = f"{author(m)} (изменено):"
-    if old:
-        head += f"\n» было: {old.replace(chr(10), ' ')[:120]}"
     try:
-        await ex.send(f"{head}\n{body or '[текст удалён]'}".strip())
-        ev(f"переслана правка сообщения {m.message_id} от {author(m)}")
+        if rec.get("ex"):
+            head = rec.get("head") or f"{author(m)}:"
+            if await ex.edit(rec["ex"], f"{head}\n{body or '[текст удалён]'}".strip()):
+                _remember(m.message_id, text=body)
+                ev(f"сообщение {m.message_id} изменено в eXpress")
+                return
+        # исходное сообщение в eXpress не найдено — отправляем правку отдельным сообщением
+        head = f"{author(m)} (изменено):"
+        if old:
+            head += f"\n» было: {old.replace(chr(10), ' ')[:120]}"
+        ex_id = await ex.send(f"{head}\n{body or '[текст удалён]'}".strip())
+        _remember(m.message_id, text=body, ex=ex_id, head=f"{author(m)} (изменено):")
+        ev(f"правка сообщения {m.message_id} от {author(m)} отправлена новым сообщением")
     except Exception as e:
         ev(f"правка сообщения {m.message_id} не переслана: {e}", logging.ERROR)
 
@@ -409,7 +505,7 @@ async def on_message(m: Message):
         q = (m.reply_to_message.text or m.reply_to_message.caption or "[вложение]").replace("\n", " ")
         head += f"\n» {q[:120]}"
     body = m.text or m.caption or ""
-    _remember(m.message_id, body)
+    _remember(m.message_id, text=body, head=head)
     obj, name, is_photo = media(m)
     path = None
     try:
@@ -422,7 +518,9 @@ async def on_message(m: Message):
                 await bot.download(obj, destination=path)
         elif not body:
             body = "[стикер, опрос или другой тип сообщения — не поддерживается]"
-        await ex.send(f"{head}\n{body}".strip(), path, is_photo)
+        ex_id = await ex.send(f"{head}\n{body}".strip(), path, is_photo)
+        if ex_id:
+            _remember(m.message_id, ex=ex_id)
         ev(f"переслано сообщение {m.message_id} от {author(m)}")
     except Exception as e:
         ev(f"сообщение {m.message_id} не переслано: {e}", logging.ERROR)
