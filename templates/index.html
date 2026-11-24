@@ -538,7 +538,12 @@
                 info.appendChild(bridgeLine('Вход в eXpress', d.logged_in ? 'выполнен' : 'нужен'));
                 info.appendChild(bridgeLine('Чат eXpress', d.express_chat || '—'));
                 info.appendChild(bridgeLine('Telegram-чат', d.tg_chat_id ? String(d.tg_chat_id) : 'не задан (TG_CHAT_ID), только журнал'));
-                info.appendChild(bridgeLine('Переслано', d.sent + ', ошибок: ' + d.failed + ', последняя отправка: ' + d.last_ok));
+                info.appendChild(bridgeLine('Доставлено (подтверждено eXpress)', (d.delivered || 0) + ', последняя доставка: ' + d.last_ok));
+                info.appendChild(bridgeLine('В очереди / ждут подтверждения', String(d.pending || 0)));
+                info.appendChild(bridgeLine('Не доставлено', String(d.failed || 0)));
+                (d.undelivered || []).forEach(function (u) {
+                    info.appendChild(bridgeLine('✗ ' + u.time, 'TG #' + u.tg + ' «' + u.text + '» — ' + u.reason));
+                });
                 info.appendChild(bridgeLine('Последняя ошибка', d.last_error || '—'));
                 info.appendChild(bridgeLine('Версия', d.version));
                 const lg = document.getElementById('br-login');
