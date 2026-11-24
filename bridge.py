@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.24-1"
+VERSION = "2026.11.24-2"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bridge")
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -63,12 +63,30 @@ class Express:
             viewport={"width": 1400, "height": 900},
             args=["--no-sandbox", "--disable-dev-shm-usage"])
         self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
-        await self.page.goto(WEB_URL, wait_until="domcontentloaded")
         state["browser"] = "работает"
-        ev("браузер запущен, открыт corp.express")
+        ev("браузер запущен")
+        await self.ensure_page()
+
+    async def ensure_page(self) -> bool:
+        """Открывает corp.express, если вкладка ещё не там; ошибки сети не роняют мост."""
+        if "corp.express" in (self.page.url or ""):
+            return True
+        t0 = time.time()
+        try:
+            await self.page.goto(WEB_URL, wait_until="commit", timeout=120000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=120000)
+            ev(f"corp.express открыт за {time.time() - t0:.1f} с")
+            return True
+        except Exception as e:
+            ev(f"corp.express не открылся за {time.time() - t0:.0f} с: {str(e).splitlines()[0]}", logging.ERROR)
+            state["last_error"] = f"{time.strftime('%H:%M:%S')} corp.express недоступен"
+            return False
 
     async def check_login(self) -> bool:
         p = self.page
+        if not await self.ensure_page():
+            state["logged_in"] = False
+            return False
         try:
             await p.locator(f"{S_ENTRY}, .slate-message-input, canvas, img[src*=qr]").or_(
                 p.get_by_text(re.compile("QR"))).first.wait_for(timeout=20000)
@@ -154,7 +172,7 @@ class Express:
                     state["last_error"] = f"{time.strftime('%H:%M:%S')} {e}"
                     ev(f"попытка {attempt}: ошибка отправки: {e}", logging.ERROR)
                     try:
-                        await self.page.reload(wait_until="domcontentloaded")
+                        await self.page.reload(wait_until="commit", timeout=120000)
                     except Exception:
                         pass
                     await asyncio.sleep(5 * attempt)
@@ -239,7 +257,14 @@ async def _main():
     session = AiohttpSession(api=TelegramAPIServer.from_base(TG_API_BASE)) if TG_API_BASE else None
     bot = Bot(TG_TOKEN, session=session) if session else Bot(TG_TOKEN)
     ev(f"мост запущен, версия {VERSION}")
-    await ex.start()
+    while True:
+        try:
+            await ex.start()
+            break
+        except Exception as e:
+            state["browser"] = f"ошибка запуска: {str(e)[:150]}"
+            ev(f"браузер не запустился, повтор через 60 с: {e}", logging.ERROR)
+            await asyncio.sleep(60)
     if not await ex.check_login():
         ev("нужен вход в eXpress по QR-коду", logging.WARNING)
     asyncio.create_task(ex.watchdog())
@@ -336,7 +361,10 @@ setTimeout(()=>location.reload(),30000)</script>"""
             return r
         async def go():
             async with ex.lock:
-                await ex.page.goto(WEB_URL, wait_until="domcontentloaded")
+                try:
+                    await ex.page.goto(WEB_URL, wait_until="commit", timeout=120000)
+                except Exception as e:
+                    ev(f"перезагрузка: {e}", logging.ERROR)
                 await ex.check_login()
-        _run(go(), 60)
+        _run(go(), 280)
         return redirect("/bridge")
