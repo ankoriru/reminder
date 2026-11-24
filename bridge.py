@@ -15,7 +15,8 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-1"
+VERSION = "2026.11.25-2"
+IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "384"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bridge")
@@ -55,6 +56,7 @@ class Express:
         self.pw = None
         self.proc = None
         self.browser = None
+        self.last_used = 0.0
 
     async def start(self):
         """Chromium запускается отдельным процессом с низким приоритетом (nice 15) и
@@ -94,10 +96,48 @@ class Express:
         else:
             raise RuntimeError("Chromium не ответил за 60 с")
         self.ctx = self.browser.contexts[0]
+        await self.ctx.route("**/*", self._filter)
         self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
         state["browser"] = "работает"
         ev("браузер запущен")
         await self.ensure_page()
+
+    @staticmethod
+    async def _filter(route):
+        r = route.request
+        if r.resource_type in ("font", "media") or "sentry" in r.url:
+            await route.abort()
+        else:
+            await route.continue_()
+
+    def running(self) -> bool:
+        return bool(self.proc and self.proc.poll() is None and self.page)
+
+    async def awake(self):
+        """Браузер поднимается только когда нужен: в простое его нет, памяти и CPU он не ест."""
+        self.last_used = time.time()
+        if not self.running():
+            state["browser"] = "запуск"
+            await self.start()
+        self.last_used = time.time()
+
+    async def sleep(self, reason=""):
+        if not self.proc:
+            return
+        try:
+            cdp = await self.browser.new_browser_cdp_session()
+            await cdp.send("Browser.close")            # штатное закрытие, профиль сохраняется
+        except Exception:
+            pass
+        for _ in range(30):
+            if self.proc.poll() is not None:
+                break
+            await asyncio.sleep(0.5)
+        else:
+            self.proc.kill()
+        self.proc = self.page = self.ctx = self.browser = None
+        state["browser"] = "спит (запустится при новом сообщении)"
+        ev(f"браузер закрыт{reason}")
 
     async def ensure_page(self) -> bool:
         """Открывает corp.express, если вкладка ещё не там; ошибки сети не роняют мост."""
@@ -171,6 +211,7 @@ class Express:
         async with self.lock:
             for attempt in range(1, 4):
                 try:
+                    await self.awake()
                     while not await self.check_login():       # ждём, пока войдут по QR
                         await asyncio.sleep(30)
                     await self.open_chat()
@@ -198,7 +239,7 @@ class Express:
                     else:
                         raise RuntimeError("сообщение осталось в поле ввода")
                     state["sent"] += 1
-                    state["last_ok"] = time.time()
+                    state["last_ok"] = self.last_used = time.time()
                     return
                 except Exception as e:
                     state["last_error"] = f"{time.strftime('%H:%M:%S')} {e}"
@@ -213,16 +254,25 @@ class Express:
 
     async def watchdog(self):
         while True:
-            await asyncio.sleep(120)
+            await asyncio.sleep(30)
             if self.lock.locked():
                 continue
             async with self.lock:
                 try:
                     if self.proc and self.proc.poll() is not None:
-                        ev(f"Chromium завершился (код {self.proc.returncode}), перезапуск", logging.ERROR)
-                        state["browser"] = "перезапуск"
-                        await self.start()
-                    await self.check_login()
+                        ev(f"Chromium завершился (код {self.proc.returncode})", logging.ERROR)
+                        self.proc = self.page = self.ctx = self.browser = None
+                        state["browser"] = "спит (запустится при новом сообщении)"
+                    if not self.running():
+                        if not state["logged_in"]:          # нужен вход: держим QR-код на экране
+                            await self.awake()
+                            await self.check_login()
+                        continue
+                    if not state["logged_in"]:
+                        await self.check_login()
+                        self.last_used = time.time() if not state["logged_in"] else self.last_used
+                    elif time.time() - self.last_used > IDLE_SEC:
+                        await self.sleep(f" после {IDLE_SEC} с простоя")
                 except Exception as e:
                     ev(f"watchdog: {e}", logging.ERROR)
 
@@ -382,8 +432,8 @@ def register(flask_app):
     def bridge_shot():
         if (r := need_auth()):
             return r
-        if not ex.page:
-            return Response("браузер не готов", 503)
+        if not ex.running():
+            return Response("браузер спит", 503)
         png = _run(ex.page.screenshot(type="png"), 20)
         return Response(png, mimetype="image/png", headers={"Cache-Control": "no-store"})
 
@@ -394,6 +444,7 @@ def register(flask_app):
         async def go():
             async with ex.lock:
                 try:
+                    await ex.awake()
                     await ex.page.goto(WEB_URL, wait_until="commit", timeout=120000)
                 except Exception as e:
                     ev(f"перезагрузка: {e}", logging.ERROR)

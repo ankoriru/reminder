@@ -267,8 +267,9 @@
             <h3>📨 Мост Telegram → eXpress</h3>
             <div class="info-box" id="br-info"><p>Загрузка…</p></div>
             <div class="info-box" id="br-login" style="display:none"></div>
-            <button type="button" class="btn-test" id="br-reload" onclick="bridgeReload()">🔄 Перезагрузить страницу eXpress</button>
+            <button type="button" class="btn-test" id="br-reload" onclick="bridgeReload()">🔄 Открыть eXpress и проверить вход</button>
             <p style="margin:15px 0 5px;font-weight:600">Экран eXpress (обновляется каждые 5 с, нажмите для увеличения)</p>
+            <p id="br-shot-note" style="display:none;color:var(--text-muted)">Браузер закрыт для экономии ресурсов. Он запустится сам, когда придёт сообщение из Telegram, или по кнопке выше.</p>
             <div style="overflow:auto">
             <img id="br-shot" alt="экран eXpress" title="Нажмите, чтобы увеличить" onclick="this.style.maxWidth=this.style.maxWidth==='none'?'100%':'none'" style="cursor:zoom-in;max-width:100%;border:1px solid #ddd;border-radius:12px;background:#fafafa;min-height:80px">
             </div>
@@ -528,7 +529,7 @@
             try {
                 const r = await fetch('/bridge/status', {cache: 'no-store'});
                 if (r.status === 401) { location.href = '/login'; return; }
-                const d = await r.json();
+                var d = await r.json();
                 const info = document.getElementById('br-info'); info.innerHTML = '';
                 if (!d.enabled) info.appendChild(bridgeLine('Статус', 'выключен: задайте EXPRESS_CHAT_NAME'));
                 info.appendChild(bridgeLine('Браузер', d.browser));
@@ -546,13 +547,20 @@
             } catch (e) {
                 document.getElementById('br-info').textContent = 'Нет ответа от сервера: ' + e;
             }
-            document.getElementById('br-shot').src = '/bridge/screenshot.png?' + Date.now();
+            const shot = document.getElementById('br-shot');
+            if (typeof d !== 'undefined' && String(d.browser).startsWith('спит')) {
+                shot.style.display = 'none';
+                document.getElementById('br-shot-note').style.display = 'block';
+            } else {
+                shot.style.display = ''; document.getElementById('br-shot-note').style.display = 'none';
+                shot.src = '/bridge/screenshot.png?' + Date.now();
+            }
         }
         async function bridgeReload() {
             const btn = document.getElementById('br-reload');
             btn.disabled = true; btn.textContent = '⏳ Перезагрузка…';
             try { await fetch('/bridge/reload', {method: 'POST'}); } catch (e) {}
-            btn.disabled = false; btn.textContent = '🔄 Перезагрузить страницу eXpress';
+            btn.disabled = false; btn.textContent = '🔄 Открыть eXpress и проверить вход';
             bridgeRefresh();
         }
         function bridgeTabChanged(id) {
