@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.24-3"
+VERSION = "2026.11.25-1"
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "384"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bridge")
@@ -347,10 +347,14 @@ def register(flask_app):
     from flask import Response, jsonify, redirect, request
 
     def need_auth():
+        """Тот же вход, что у напоминаний (сессия Flask); Basic оставлен для внешних проверок."""
+        from flask import session
+        if session.get("logged_in"):
+            return None
         a = request.authorization
         if ADMIN_PASSWORD and a and hmac.compare_digest(a.password or "", ADMIN_PASSWORD):
             return None
-        return Response("Нужен пароль", 401, {"WWW-Authenticate": 'Basic realm="bridge"'})
+        return Response("Нужен вход", 401)
 
     @flask_app.get("/bridge/health")
     def bridge_health():
@@ -361,26 +365,18 @@ def register(flask_app):
     @flask_app.get("/bridge")
     @flask_app.get("/bridge/")
     def bridge_index():
+        return redirect("/#bridge")
+
+    @flask_app.get("/bridge/status")
+    def bridge_status():
         if (r := need_auth()):
             return r
         fmt = lambda t: time.strftime("%d.%m %H:%M:%S", time.localtime(t)) if t else "—"
-        login = ("<b style='color:#1a7f37'>выполнен</b>" if state["logged_in"] else
-                 "<b style='color:#c62828'>нужен</b> — в мобильном eXpress: Чаты → значок профиля → "
-                 "Войти на компьютере → отсканируйте QR-код ниже")
-        rows = "".join(f"<div>{e}</div>" for e in events)
-        html = f"""<!doctype html><meta charset=utf-8><title>TG → eXpress</title>
-<style>body{{font:14px system-ui;margin:24px;max-width:1100px}}img{{max-width:100%;border:1px solid #ccc}}
-.log{{font:12px monospace;background:#f6f6f6;padding:8px;max-height:260px;overflow:auto}}</style>
-<h2>Мост Telegram → eXpress <small>{VERSION}</small></h2>
-<p>Браузер: {state['browser']} · Telegram: {state['telegram']}<br>Вход в eXpress: {login}<br>
-Чат eXpress: «{EX_CHAT}» · Telegram-чат: {TG_CHAT_ID}<br>
-Переслано: {state['sent']} · ошибок: {state['failed']} · последняя отправка: {fmt(state['last_ok'])}<br>
-Последняя ошибка: {state['last_error'] or '—'}</p>
-<form method=post action=/bridge/reload><button>Перезагрузить страницу eXpress</button></form>
-<p><img id=s src="/bridge/screenshot.png?{time.time()}"></p><div class=log>{rows}</div>
-<script>setInterval(()=>{{document.getElementById('s').src='/bridge/screenshot.png?'+Date.now()}},4000);
-setTimeout(()=>location.reload(),30000)</script>"""
-        return Response(html, mimetype="text/html")
+        return jsonify(version=VERSION, enabled=bool(EX_CHAT and TG_TOKEN), browser=state["browser"],
+                       telegram=state["telegram"], logged_in=state["logged_in"],
+                       express_chat=EX_CHAT, tg_chat_id=TG_CHAT_ID, sent=state["sent"],
+                       failed=state["failed"], last_ok=fmt(state["last_ok"]),
+                       last_error=state["last_error"], events=list(events))
 
     @flask_app.get("/bridge/screenshot.png")
     def bridge_shot():
@@ -402,5 +398,8 @@ setTimeout(()=>location.reload(),30000)</script>"""
                 except Exception as e:
                     ev(f"перезагрузка: {e}", logging.ERROR)
                 await ex.check_login()
-        _run(go(), 280)
-        return redirect("/bridge")
+        try:
+            _run(go(), 280)
+        except Exception as e:
+            return jsonify(ok=False, error=str(e)), 500
+        return jsonify(ok=True)

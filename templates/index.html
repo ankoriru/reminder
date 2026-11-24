@@ -258,9 +258,24 @@
         <button onclick="showTab('zs')" id="btn-zs">🔔 Значимые события</button>
         <button onclick="showTab('custom')" id="btn-custom">✍️ Custom задачи</button>
         <a href="/ai_tasks" style="padding: 14px 30px; text-decoration: none; background: var(--white); border-radius: 12px; font-weight: 600; color: var(--text-muted);">🤖 ИИ Задачи</a>
+        <button onclick="showTab('bridge')" id="btn-bridge">📨 Мост TG → eXpress</button>
     </div>
 
     <div class="content">
+        <!-- ВКЛАДКА МОСТ TELEGRAM → EXPRESS -->
+        <div id="bridge" class="tab">
+            <h3>📨 Мост Telegram → eXpress</h3>
+            <div class="info-box" id="br-info"><p>Загрузка…</p></div>
+            <div class="info-box" id="br-login" style="display:none"></div>
+            <button type="button" class="btn-test" id="br-reload" onclick="bridgeReload()">🔄 Перезагрузить страницу eXpress</button>
+            <p style="margin:15px 0 5px;font-weight:600">Экран eXpress (обновляется каждые 5 с, нажмите для увеличения)</p>
+            <div style="overflow:auto">
+            <img id="br-shot" alt="экран eXpress" title="Нажмите, чтобы увеличить" onclick="this.style.maxWidth=this.style.maxWidth==='none'?'100%':'none'" style="cursor:zoom-in;max-width:100%;border:1px solid #ddd;border-radius:12px;background:#fafafa;min-height:80px">
+            </div>
+            <p style="margin:15px 0 5px;font-weight:600">Журнал</p>
+            <div id="br-log" style="font:12px monospace;background:#f6f6f6;border-radius:12px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap"></div>
+        </div>
+
         <!-- ВКЛАДКА ДНИ РОЖДЕНИЯ -->
         <div id="dr" class="tab active-tab">
             <a href="/test_send/dr" class="btn-test">⚙️ Проверить связь (ТГ)</a>
@@ -498,6 +513,51 @@
             document.getElementById('btn-' + id).classList.add('active');
             
             localStorage.setItem('activeTab', id);
+            bridgeTabChanged(id);
+        }
+
+        // --- Вкладка «Мост TG → eXpress» ---
+        let bridgeTimer = null;
+        function bridgeLine(label, value) {
+            const p = document.createElement('p');
+            const b = document.createElement('b'); b.textContent = label + ': ';
+            p.appendChild(b); p.appendChild(document.createTextNode(value)); return p;
+        }
+        async function bridgeRefresh() {
+            if (!document.getElementById('bridge').classList.contains('active-tab')) return;
+            try {
+                const r = await fetch('/bridge/status', {cache: 'no-store'});
+                if (r.status === 401) { location.href = '/login'; return; }
+                const d = await r.json();
+                const info = document.getElementById('br-info'); info.innerHTML = '';
+                if (!d.enabled) info.appendChild(bridgeLine('Статус', 'выключен: задайте EXPRESS_CHAT_NAME'));
+                info.appendChild(bridgeLine('Браузер', d.browser));
+                info.appendChild(bridgeLine('Telegram', d.telegram));
+                info.appendChild(bridgeLine('Вход в eXpress', d.logged_in ? 'выполнен' : 'нужен'));
+                info.appendChild(bridgeLine('Чат eXpress', d.express_chat || '—'));
+                info.appendChild(bridgeLine('Telegram-чат', d.tg_chat_id ? String(d.tg_chat_id) : 'не задан (TG_CHAT_ID), только журнал'));
+                info.appendChild(bridgeLine('Переслано', d.sent + ', ошибок: ' + d.failed + ', последняя отправка: ' + d.last_ok));
+                info.appendChild(bridgeLine('Последняя ошибка', d.last_error || '—'));
+                info.appendChild(bridgeLine('Версия', d.version));
+                const lg = document.getElementById('br-login');
+                lg.style.display = d.logged_in ? 'none' : 'block';
+                lg.textContent = 'Чтобы войти: в мобильном eXpress под учётной записью моста откройте Чаты → значок профиля → «Войти на компьютере» и отсканируйте QR-код на экране ниже.';
+                document.getElementById('br-log').textContent = (d.events || []).join('\n') || 'событий нет';
+            } catch (e) {
+                document.getElementById('br-info').textContent = 'Нет ответа от сервера: ' + e;
+            }
+            document.getElementById('br-shot').src = '/bridge/screenshot.png?' + Date.now();
+        }
+        async function bridgeReload() {
+            const btn = document.getElementById('br-reload');
+            btn.disabled = true; btn.textContent = '⏳ Перезагрузка…';
+            try { await fetch('/bridge/reload', {method: 'POST'}); } catch (e) {}
+            btn.disabled = false; btn.textContent = '🔄 Перезагрузить страницу eXpress';
+            bridgeRefresh();
+        }
+        function bridgeTabChanged(id) {
+            clearInterval(bridgeTimer); bridgeTimer = null;
+            if (id === 'bridge') { bridgeRefresh(); bridgeTimer = setInterval(bridgeRefresh, 5000); }
         }
 
         function toggleDays() {
@@ -507,8 +567,8 @@
         }
         
         document.addEventListener('DOMContentLoaded', function() {
-            const savedTab = localStorage.getItem('activeTab');
-            if (savedTab) {
+            const savedTab = location.hash === '#bridge' ? 'bridge' : localStorage.getItem('activeTab');
+            if (savedTab && document.getElementById(savedTab)) {
                 showTab(savedTab);
             }
         });
