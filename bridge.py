@@ -15,7 +15,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-4"
+VERSION = "2026.11.25-5"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -181,10 +181,38 @@ class Express:
             ev("вход в eXpress выполнен" if ok else "нужен вход в eXpress по QR-коду",
                logging.INFO if ok else logging.WARNING)
         state["logged_in"] = ok
+        if ok:
+            try:
+                await self.dismiss_popups()
+            except Exception as e:
+                ev(f"не удалось закрыть окно eXpress: {e}", logging.WARNING)
         return ok
+
+    async def dismiss_popups(self):
+        """Закрывает рекламные и информационные окна eXpress («Ваши возможности в eXpress» и т. п.)."""
+        p = self.page
+        for _ in range(3):
+            btn = p.get_by_text(re.compile(r"^\s*(Больше не показывать|Don't show again|Не сейчас|Понятно|Закрыть)\s*$"))
+            if await btn.count() and await btn.first.is_visible():
+                await btn.first.click(timeout=5000)
+                ev("закрыто всплывающее окно eXpress")
+                await p.wait_for_timeout(500)
+                continue
+            dlg = p.locator("[role=dialog], .modal, [class*=modal]").filter(has_text=re.compile("eXpress"))
+            if await dlg.count() and await dlg.first.is_visible():
+                await p.keyboard.press("Escape")
+                await p.wait_for_timeout(500)
+                if await dlg.count() and await dlg.first.is_visible():
+                    close = dlg.first.locator("button, [class*=close]").filter(has_not_text=re.compile(r"\w"))
+                    if await close.count():
+                        await close.first.click(timeout=5000)
+                        await p.wait_for_timeout(500)
+                continue
+            break
 
     async def open_chat(self):
         p = self.page
+        await self.dismiss_popups()
         active = p.locator(f"{S_ENTRY}.chat-list-entry--active {S_ENTRY_NAME}")
         if await active.count() and (await active.first.inner_text()).strip() == EX_CHAT:
             return
