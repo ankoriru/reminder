@@ -17,7 +17,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.26-2"
+VERSION = "2026.11.26-3"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -419,14 +419,18 @@ class Express:
             await self.page.wait_for_timeout(500)
         return st
 
-    async def find_posted(self, item) -> str | None:
-        """Ищет уже отправленную копию (после сбоя между Enter и записью id), чтобы не задублировать."""
+    async def find_posted(self, item, trust_new: bool = False) -> str | None:
+        """Ищет уже отправленную копию (после сбоя между Enter и записью id), чтобы не задублировать.
+        Текст сравнивается только по буквам и цифрам: eXpress показывает эмодзи картинками и
+        форматирует разметку, поэтому innerText не совпадает с набранным текстом посимвольно.
+        trust_new: сразу после Enter новое собственное сообщение служебного аккаунта — наше."""
         before = set(item.get("before") or [])
-        head, tail = item["marker"]
-        for i in reversed((await self.my_ids())[-15:]):
-            if i in before:
-                continue
-            t = await self.page.evaluate("(id) => document.getElementById(id)?.innerText || ''", i)
+        new = [i for i in (await self.my_ids())[-15:] if i not in before]
+        if trust_new and new:
+            return new[-1]
+        head, tail = (_key(x)[:40] for x in item["marker"])
+        for i in reversed(new):
+            t = _key(await self.page.evaluate("(id) => document.getElementById(id)?.innerText || ''", i))
             if head in t and tail in t:
                 return i
         return None
@@ -456,7 +460,7 @@ class Express:
         else:
             raise RuntimeError("сообщение осталось в поле ввода")
         for _ in range(20):
-            found = await self.find_posted(item)
+            found = await self.find_posted(item, trust_new=True)
             if found:
                 item["ex"], item["stage"] = found, "local"
                 save_outbox()
@@ -492,6 +496,11 @@ def confirmed(st: str) -> bool:
 
 def _norm(t: str) -> str:
     return re.sub(r"\s+", " ", t or "").strip()
+
+
+def _key(t: str) -> str:
+    """Только буквы и цифры — для сравнения набранного текста с тем, как его показал eXpress."""
+    return re.sub(r"[\W_]+", "", (t or "").lower())
 
 
 def _renice_children(nice=15):
