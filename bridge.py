@@ -10,14 +10,14 @@ from collections import OrderedDict, deque
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.26-1"
+VERSION = "2026.11.26-2"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -726,6 +726,54 @@ def forward_own(m: Message):
         log.warning(f"мост не принял собственное сообщение бота: {e}")
 
 
+RESEND_MARK = DATA / "resend_last_bot.done"
+
+
+async def resend_last_bot_once(span: int = 300):
+    """Разово: находит последнее сообщение бота в группе и ставит его в очередь eXpress.
+    Bot API не отдаёт историю, поэтому сообщения по очереди пересылаются в служебный чат
+    (копии сразу удаляются), от больших id к меньшим, до первого сообщения самого бота."""
+    if RESEND_MARK.exists():
+        return
+    await asyncio.sleep(20)
+    service = _service_chat()
+    if not service:
+        ev("разовая пересылка последнего сообщения бота: не задан служебный чат", logging.WARNING)
+        return
+    me = await bot.get_me()
+    known = [int(k) for k in _map] or [0]
+    top = max(known) + span
+    for i in range(top, max(max(known) - span, 0), -1):
+        try:
+            r = await bot.forward_message(service, TG_CHAT_ID, i, disable_notification=True)
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+            r = await bot.forward_message(service, TG_CHAT_ID, i, disable_notification=True)
+        except TelegramBadRequest:
+            await asyncio.sleep(0.04)
+            continue
+        try:
+            await bot.delete_message(service, r.message_id)
+        except Exception:
+            pass
+        o = r.forward_origin
+        if getattr(getattr(o, "sender_user", None), "id", None) == me.id and (r.text or r.caption):
+            body = r.text or r.caption
+            if not (str(i) in _map and _map[str(i)].get("queued")):
+                head = f"{author(r)}:"
+                _remember(i, text=body, head=head, ts=int(time.time()), queued=True)
+                enqueue({"kind": "send", "tg": i, "text": f"{head}\n{body}".strip(),
+                         "file": None, "photo": False, "who": author(r)})
+                ev(f"разово: последнее сообщение бота {i} поставлено в очередь eXpress")
+            else:
+                ev(f"разово: последнее сообщение бота {i} уже было передано")
+            RESEND_MARK.write_text(str(i))
+            return
+        await asyncio.sleep(0.04)
+    ev("разово: сообщение бота в группе не найдено", logging.WARNING)
+    RESEND_MARK.write_text("not found")
+
+
 # ---------- очередь отправки с подтверждением доставки ----------
 # Каждое действие (отправка, правка, удаление) лежит в /data/bridge_outbox.json, пока eXpress
 # не подтвердит его. Порядок сохраняется, после перезапуска очередь продолжается с того же места.
@@ -953,6 +1001,7 @@ async def _main():
     asyncio.create_task(deletion_watch())
     load_outbox()
     asyncio.create_task(outbox_worker())
+    asyncio.create_task(resend_last_bot_once())
     # handle_as_tasks=False: строго по порядку; необработанные апдейты Telegram отдаст повторно
     while True:
         try:
