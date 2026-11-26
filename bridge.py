@@ -17,7 +17,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import Message
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-VERSION = "2026.11.25-9"
+VERSION = "2026.11.26-1"
 IDLE_SEC = int(os.getenv("BROWSER_IDLE_SEC", "120"))   # браузер закрывается после простоя
 JS_HEAP_MB = int(os.getenv("JS_HEAP_MB", "256"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -698,6 +698,32 @@ async def on_message(m: Message):
     _remember(m.message_id, text=m.text or m.caption or "", head=head, ts=int(time.time()), queued=True)
     enqueue({"kind": "send", "tg": m.message_id, "text": f"{head}\n{body}".strip(),
              "file": path, "photo": is_photo, "who": author(m)})
+
+
+def _queue_own(m: Message):
+    """Сообщение, которое бот remind сам отправил в группу (напоминание, ИИ-текст, сводка)."""
+    if m.chat.id != TG_CHAT_ID:
+        return
+    if str(m.message_id) in _map and _map[str(m.message_id)].get("queued"):
+        return
+    head = f"{author(m)}:"
+    body = m.text or m.caption or ""
+    if not body:
+        return
+    _remember(m.message_id, text=body, head=head, ts=int(time.time()), queued=True)
+    enqueue({"kind": "send", "tg": m.message_id, "text": f"{head}\n{body}".strip(),
+             "file": None, "photo": False, "who": author(m)})
+    ev(f"собственное сообщение бота {m.message_id} поставлено в очередь")
+
+
+def forward_own(m: Message):
+    """Вызывается из потока remind после успешной отправки; передаёт сообщение в цикл моста."""
+    if LOOP is None or not EX_CHAT:
+        return
+    try:
+        LOOP.call_soon_threadsafe(_queue_own, m)
+    except RuntimeError as e:
+        log.warning(f"мост не принял собственное сообщение бота: {e}")
 
 
 # ---------- очередь отправки с подтверждением доставки ----------

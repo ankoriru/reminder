@@ -88,11 +88,30 @@ def start_bot_loop(loop):
 
 threading.Thread(target=start_bot_loop, args=(bot_loop,), daemon=True).start()
 
+# Обработчики уже отправленных ботом сообщений. Telegram не присылает боту его собственные
+# сообщения, поэтому мост в eXpress подписывается здесь (см. bridge.register).
+SENT_HOOKS = []
+
+
+def _after_send(fut):
+    try:
+        msg = fut.result()
+    except Exception as e:
+        print(f"[ERROR] Send failed: {e}")
+        return
+    for hook in SENT_HOOKS:
+        try:
+            hook(msg)
+        except Exception as e:
+            print(f"[ERROR] Sent hook failed: {e}")
+
+
 def send_msg_threadsafe(text):
     """Безопасная отправка сообщения"""
     if bot and CHAT_ID:
         try:
-            asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text, parse_mode='HTML'), bot_loop)
+            fut = asyncio.run_coroutine_threadsafe(bot.send_message(CHAT_ID, text, parse_mode='HTML'), bot_loop)
+            fut.add_done_callback(_after_send)
         except Exception as e:
             print(f"[ERROR] Send failed: {e}")
 
